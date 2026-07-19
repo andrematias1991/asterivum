@@ -1,0 +1,12 @@
+export type User = { id:number; email:string; name:string; role:'USER'|'ADMIN'; status?:string };
+export type Profile = { id:number; name:string; birthDate:string; birthTime:string; place:string; latitude:number; longitude:number; timezone:number; timezoneId?:string|null; houseSystem:'PLACIDUS'|'WHOLE_SIGN'|'EQUAL'; zodiac:'TROPICAL'|'SIDEREAL'; notes:string; isPrimary:number|boolean };
+export type Planet = { name:string; glyph:string; longitude:number; sign:string; signIndex:number; degree:number; minute:number; retrograde:boolean };
+export type Aspect = { from:string; to:string; type:string; glyph:string; angle:number; orb:number };
+export type Chart = { mode:string; chartDate:string; natalDate:string; planets:Planet[]; natal:Planet[]; houses:{number:number;longitude:number;sign:string}[]; aspects:Aspect[]; natalAspects:Aspect[]; angles:{ascendant:Planet;midheaven:Planet}; settings:{zodiac:string;houseSystem:string;houseAccuracy:string} };
+export type LocationResult = { id:number; name:string; label:string; latitude:number; longitude:number; timezone:string|null };
+export type TransitHit = { date:string; retrograde:boolean; orb:number };
+export type TransitReportEvent = { id:string; transitPlanet:string; natalPlanet:string; aspect:string; glyph:string; startDate:string; endDate:string; exactHits:TransitHit[]; peakDate:string; peakOrb:number; strength:number; strengthLabel:string; transitSign:string; natalHouse:number; hasRetrogradePass:boolean; startsBeforeRange:boolean; continuesBeyondRange:boolean; interpretation:string };
+export type SynastryHighlight = Aspect & { tone:string; interpretation:string };
+export type SynastryResult = { chart:Chart; summary:{score:number;harmony:number;tension:number;conjunctions:number;total:number;label:string}; highlights:SynastryHighlight[] };
+export type AstroLine = { planet:string; glyph:string; angle:'MC'|'IC'|'ASC'|'DSC'; points:{latitude:number;longitude:number}[] };
+export type AstroMapResult = { date:string; birthplace:{latitude:number;longitude:number;place:string}; lines:AstroLine[] };

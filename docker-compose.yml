@@ -1,0 +1,14 @@
+services:
+  astralis:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-replace-this-before-production}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@astralis.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+    volumes:
+      - astralis-data:/app/data
+    restart: unless-stopped
+volumes:
+  astralis-data:

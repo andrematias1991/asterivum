@@ -1,0 +1,9 @@
+node_modules/
+.venv/
+build/
+dist/
+data/
+.env
+.env.*.local
+*.log
+coverage/

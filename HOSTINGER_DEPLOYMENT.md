@@ -16,11 +16,8 @@ Do not use Railway's generated domain for the production frontend. A different r
 
 1. Create a Railway project from this repository.
 2. Add a MySQL service to the same project.
-3. Configure the application service:
-   - Build command: `npm ci && npm run build:server`
-   - Start command: `npm start`
-   - Health check: `/api/health`
-4. Set `DATABASE_URL` using a Railway reference to the MySQL service's private connection URL. Use the dashboard variable picker so the password is not copied into source control.
+3. Leave the build and start commands empty. Railway automatically uses the repository's `Dockerfile`, which compiles and starts the API. In the service settings, set the health-check path to `/api/health`.
+4. In the API service's **Variables** tab, set `DATABASE_URL=${{MySQL.MYSQL_URL}}` (replace `MySQL` if you gave that service another name). This is a private Railway reference; do not copy the public database URL into the application.
 5. Set these application variables:
 
 ```text
@@ -34,14 +31,14 @@ ADMIN_EMAIL=<your email, first deployment only>
 ADMIN_INITIAL_PASSWORD=<unique 14+ character password, first deployment only>
 ```
 
-Railway supplies `PORT`; do not hard-code it. Generate the session secret locally:
+Railway supplies `PORT`; do not create or hard-code that variable. Generate the session secret locally:
 
 ```sh
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
-6. Add `api.example.com` as the Railway service's custom domain. Railway shows the DNS target.
-7. In Hostinger DNS, create the requested CNAME for `api` and wait for Railway to issue TLS.
+6. Add `api.example.com` under the API service's **Settings -> Networking -> Custom Domain**. Railway shows a CNAME and a domain-verification TXT record.
+7. In Hostinger's DNS Zone Editor, remove any conflicting `api` A, AAAA, or CNAME record, then add **both** records exactly as Railway shows them. Do not create a separate Hostinger website for this subdomain. Wait for Railway to show the domain as verified and issue TLS.
 8. Deploy and confirm `https://api.example.com/api/health` returns `status: ok`.
 9. Sign in with the initial administrator, remove `ADMIN_INITIAL_PASSWORD`, and redeploy/restart.
 

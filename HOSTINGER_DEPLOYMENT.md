@@ -42,6 +42,8 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 8. Deploy and confirm `https://api.example.com/api/health` returns `status: ok`.
 9. Sign in with the initial administrator, remove `ADMIN_INITIAL_PASSWORD`, and redeploy/restart.
 
+If Railway returns `502 connection refused`, inspect the API service's **Deployments -> latest deployment -> Deploy Logs** (not HTTP Logs). A healthy startup ends with `Asterivum listening on 0.0.0.0:<port> (production)`. Also confirm that the custom domain's target port is unset/automatic and that you did not create a manual `PORT` variable.
+
 ## 2. Build the static frontend
 
 Build locally with the production API URL. On PowerShell:

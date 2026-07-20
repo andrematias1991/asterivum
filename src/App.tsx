@@ -82,7 +82,10 @@ function Auth({ onAuth, onContinueGuest }: { onAuth: (u: User) => void; onContin
         `/auth/${register ? "register" : "login"}`,
         { method: "POST", body: JSON.stringify(form) },
       );
-      onAuth(r.user);
+      if (!r.user) throw new Error(t("Authentication response was incomplete"));
+      const verified = await api<{user:User}>("/me");
+      if (!verified.user) throw new Error(t("Authentication response was incomplete"));
+      onAuth(verified.user);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -924,20 +927,26 @@ function Ephemeris() {
     ),
     [step, setStep] = useState(1),
     [rows, setRows] = useState<{ date: string; planets: Planet[] }[]>([]),
-    [loading, setLoading] = useState(false);
+    [loading, setLoading] = useState(false),
+    [error, setError] = useState("");
   const load = async () => {
     setLoading(true);
+    setError("");
     try {
       const r = await api<{ rows: typeof rows }>(
         `/ephemeris?start=${start}&end=${end}&step=${step}`,
       );
+      if (!Array.isArray(r.rows)) throw new Error(t("Could not load the ephemeris"));
       setRows(r.rows);
+    } catch (value) {
+      setRows([]);
+      setError((value as Error).message || t("Could not load the ephemeris"));
     } finally {
       setLoading(false);
     }
   };
   useEffect(() => {
-    load();
+    void load();
   }, []);
   return (
     <>
@@ -976,11 +985,12 @@ function Ephemeris() {
             <option value="30">{t("Monthly")}</option>
           </select>
         </label>
-        <button className="primary" onClick={load}>
+        <button className="primary" onClick={load} disabled={loading}>
           <Activity size={16} />
           {t(loading ? "Calculating…" : "Calculate")}
         </button>
       </div>
+      {error && <div className="error ephemeris-error">{error} <button className="text-btn" onClick={load}>{t("Try again")}</button></div>}
       <div className="ephemeris-card">
         <div className="ephemeris-scroll">
           <table>

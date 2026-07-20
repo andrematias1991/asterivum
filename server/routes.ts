@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { db, transaction } from './db.js';
-import { createSession, destroySession, requireAdmin, requireAuth, requireCsrf } from './auth.js';
+import { createSession, csrfToken, destroySession, requireAdmin, requireAuth, requireCsrf } from './auth.js';
 import { config } from './config.js';
 import { astrocartography, calculateChart, calculateSynastry, ephemeris, forecast, transitReport, TRANSIT_ASPECT_NAMES, utcOffsetAtLocalTime } from './astro.js';
 import { calculateNatalAnalysis } from './natalAnalysis.js';
@@ -88,8 +88,8 @@ api.post('/auth/register', async (req,res) => {
     throw error;
   }
   const user: AuthUser = { id:result.insertId, email, name:parsed.data.name, role:'USER' };
-  await createSession(res, user, req.get('user-agent'));
-  res.status(201).json({ user });
+  const csrf = await createSession(res, user, req.get('user-agent'));
+  res.status(201).json({ user,csrfToken:csrf });
 });
 
 api.post('/auth/login', async (req,res) => {
@@ -98,11 +98,11 @@ api.post('/auth/login', async (req,res) => {
   const row = await db.first<Record<string,unknown>>('SELECT * FROM users WHERE email=?', [parsed.data.email.toLowerCase()]);
   if (!row || row.status !== 'ACTIVE' || !await bcrypt.compare(parsed.data.password, String(row.password_hash))) return res.status(401).json({ error:'Email or password is incorrect' });
   const user = safeUser(row) as AuthUser;
-  await createSession(res, user, req.get('user-agent'));
-  res.json({ user });
+  const csrf = await createSession(res, user, req.get('user-agent'));
+  res.json({ user,csrfToken:csrf });
 });
 
-api.get('/me', requireAuth, (req:AuthedRequest,res) => res.json({ user:req.user }));
+api.get('/me', requireAuth, (req:AuthedRequest,res) => res.json({ user:req.user,csrfToken:csrfToken(req) }));
 api.post('/auth/logout', requireAuth, requireCsrf, async (req:AuthedRequest,res) => { await destroySession(req,res); res.status(204).end(); });
 
 api.get('/profiles', requireAuth, async (req:AuthedRequest,res) => {

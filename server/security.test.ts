@@ -58,13 +58,14 @@ describe('session security', () => {
     const registration = await agent.post('/api/auth/register').send({ name:'Security Test', email:'security@example.test', password:'CorrectHorseBattery12!' });
     expect(registration.status).toBe(201);
     expect(registration.body.token).toBeUndefined();
+    expect(registration.body.csrfToken).toEqual(expect.any(String));
     const cookies = registration.headers['set-cookie'] as unknown as string[];
     expect(cookies.some(value => value.startsWith('astralis_session=') && value.includes('HttpOnly'))).toBe(true);
 
     expect((await agent.get('/api/me')).status).toBe(200);
     expect((await agent.post('/api/profiles').send({})).status).toBe(403);
 
-    const csrf = cookies.find(value => value.startsWith('astralis_csrf='))!.split(';')[0].split('=')[1];
+    const csrf = registration.body.csrfToken;
     expect((await agent.post('/api/auth/logout').set('X-CSRF-Token', csrf)).status).toBe(204);
     expect((await agent.get('/api/me')).status).toBe(401);
   });

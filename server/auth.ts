@@ -22,7 +22,10 @@ export async function createSession(res: Response, user: AuthUser, userAgent = '
   ]);
   res.cookie(SESSION_COOKIE, token, cookieOptions(true));
   res.cookie(CSRF_COOKIE, csrf, cookieOptions(false));
+  return csrf;
 }
+
+export function csrfToken(req:AuthedRequest) { return req.cookies?.[CSRF_COOKIE] as string|undefined; }
 
 export async function destroySession(req: AuthedRequest, res: Response) {
   const token = req.cookies?.[SESSION_COOKIE];

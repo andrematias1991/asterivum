@@ -5,6 +5,7 @@ import { db, transaction } from './db.js';
 import { createSession, destroySession, requireAdmin, requireAuth, requireCsrf } from './auth.js';
 import { config } from './config.js';
 import { astrocartography, calculateChart, calculateSynastry, ephemeris, forecast, transitReport, TRANSIT_ASPECT_NAMES, utcOffsetAtLocalTime } from './astro.js';
+import { calculateNatalAnalysis } from './natalAnalysis.js';
 import type { AuthedRequest, AuthUser, BirthData } from './types.js';
 
 export const api = Router();
@@ -15,6 +16,11 @@ const profileSchema = z.object({
   place:z.string().min(2).max(150), latitude:z.number().min(-90).max(90), longitude:z.number().min(-180).max(180),
   timezone:z.number().min(-14).max(14), timezoneId:z.string().trim().min(1).max(80).nullable().optional().default(null), houseSystem:z.enum(['PLACIDUS','WHOLE_SIGN','EQUAL']).default('PLACIDUS'),
   zodiac:z.enum(['TROPICAL','SIDEREAL']).default('TROPICAL'), notes:z.string().max(4000).default(''), isPrimary:z.boolean().default(false),
+});
+const previewChartSchema = z.object({
+  profile:profileSchema,
+  mode:z.enum(['NATAL','TRANSIT']).default('NATAL'),
+  targetDate:z.iso.datetime().optional(),
 });
 
 const locationQuery = z.object({ q:z.string().trim().min(3).max(100) });
@@ -34,7 +40,7 @@ api.get('/health', async (_req,res) => {
 });
 api.get('/auth/config', (_req,res) => res.json({ registrationEnabled:config.registrationEnabled }));
 
-api.get('/locations/search', requireAuth, async (req,res) => {
+api.get('/locations/search', async (req,res) => {
   const parsed = locationQuery.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error:'Enter at least three characters' });
   const key = parsed.data.q.toLocaleLowerCase();
@@ -147,7 +153,7 @@ async function profileById(id:number, userId:number) {
     FROM birth_profiles WHERE id=? AND user_id=?`, [id,userId]);
 }
 
-api.post('/locations/offset', requireAuth, requireCsrf, (req,res) => {
+api.post('/locations/offset', (req,res) => {
   const parsed = z.object({
     date:z.iso.date(), time:z.string().regex(/^\d{2}:\d{2}$/), timezoneId:z.string().trim().min(1).max(80),
   }).safeParse(req.body);
@@ -159,12 +165,25 @@ api.post('/locations/offset', requireAuth, requireCsrf, (req,res) => {
   }
 });
 
+api.post('/charts/preview', (req,res) => {
+  const parsed = previewChartSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error:'Birth profile is incomplete or invalid', details:z.flattenError(parsed.error) });
+  const target = parsed.data.targetDate ? new Date(parsed.data.targetDate) : undefined;
+  res.json({ chart:calculateChart(parsed.data.profile,parsed.data.mode,target) });
+});
+
 api.get('/charts/:id', requireAuth, async (req:AuthedRequest,res) => {
   const profile = await ownedProfile(req);
   if (!profile) return res.status(404).json({ error:'Profile not found' });
   const mode = z.enum(['NATAL','TRANSIT','PROGRESSION']).catch('NATAL').parse(req.query.mode);
   const target = req.query.date ? new Date(String(req.query.date)) : undefined;
   res.json({ chart:calculateChart(profile,mode,target) });
+});
+
+api.get('/natal-analysis/:id', requireAuth, async (req:AuthedRequest,res) => {
+  const profile = await ownedProfile(req);
+  if (!profile) return res.status(404).json({ error:'Profile not found' });
+  res.json({ analysis:calculateNatalAnalysis(profile,req.get('x-app-language') === 'pt-PT' ? 'pt-PT':'en') });
 });
 
 api.get('/synastry', requireAuth, async (req:AuthedRequest,res) => {
@@ -181,7 +200,7 @@ api.get('/astrocartography/:id', requireAuth, async (req:AuthedRequest,res) => {
   res.json(astrocartography(profile));
 });
 
-api.get('/ephemeris', requireAuth, (req,res) => {
+api.get('/ephemeris', (req,res) => {
   const start = new Date(String(req.query.start || new Date().toISOString()));
   const end = new Date(String(req.query.end || new Date(start.getTime()+30*86400000).toISOString()));
   const step = Math.max(1,Math.min(31,Number(req.query.step)||1));

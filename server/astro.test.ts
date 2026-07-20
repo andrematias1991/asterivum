@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ascendant, astrocartography, astroInternals, birthToUtc, calculateChart, calculateSynastry, ephemeris, forecast, midheaven, transitReport, utcOffsetAtLocalTime } from './astro';
+import { calculateNatalAnalysis } from './natalAnalysis';
 import type { BirthData } from './types';
 
 const sample:BirthData={name:'Test Native',birthDate:'1990-01-01',birthTime:'12:00',place:'Lisbon',latitude:38.7223,longitude:-9.1393,timezone:0,houseSystem:'WHOLE_SIGN',zodiac:'TROPICAL'};
@@ -86,5 +87,27 @@ describe('astrology engine',()=>{
     expect(map.lines).toHaveLength(40);
     expect(new Set(map.lines.map(line=>line.angle))).toEqual(new Set(['ASC','DSC','MC','IC']));
     expect(map.lines.every(line=>line.points.every(point=>point.longitude>=-180&&point.longitude<=180))).toBe(true);
+  });
+  it('builds a complete evidence-based Level I natal analysis',()=>{
+    const analysis=calculateNatalAnalysis(sample);
+    expect(analysis.planets).toHaveLength(11);
+    expect(analysis.planets.every(planet=>planet.house>=1&&planet.house<=12)).toBe(true);
+    expect(analysis.elements.total).toBe(10);
+    expect(Object.values(analysis.elements.counts).reduce((sum,count)=>sum+count,0)).toBe(10);
+    expect(analysis.angles).toHaveLength(4);
+    expect(analysis.houseRulers).toHaveLength(12);
+    expect(analysis.nodes.north.longitude).toBeCloseTo(astroInternals.normalize(analysis.nodes.south.longitude+180),6);
+    expect(analysis.lunation.elongation).toBeGreaterThanOrEqual(0);
+    expect(analysis.lunation.elongation).toBeLessThan(360);
+    expect(analysis.sections.origins).toHaveLength(6);
+    expect(analysis.sections.direction).toHaveLength(6);
+    expect(analysis.significantAspects.length).toBeGreaterThan(0);
+    expect(analysis.significantAspects[0].significance).toBeGreaterThanOrEqual(analysis.significantAspects.at(-1)!.significance);
+  });
+  it('labels disputed outer-planet dignity and localizes Level I sections',()=>{
+    const analysis=calculateNatalAnalysis(sample,'pt-PT');
+    expect(analysis.planets.filter(planet=>['Uranus','Neptune','Pluto'].includes(planet.name)).every(planet=>planet.dignity.disputed)).toBe(true);
+    expect(analysis.sections.origins[0].title).toBe('Nodo Sul');
+    expect(analysis.synthesis.direction).toContain('MC');
   });
 });

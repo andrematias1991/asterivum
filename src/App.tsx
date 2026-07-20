@@ -11,6 +11,8 @@ import {
   Globe2,
   HeartHandshake,
   LayoutDashboard,
+  Lock,
+  LogIn,
   LogOut,
   Menu,
   MoonStar,
@@ -28,11 +30,12 @@ import { api } from "./api";
 import ChartWheel from "./ChartWheel";
 import SynastryView from "./SynastryView";
 import AstroMapView from "./AstroMapView";
+import NatalAnalysisView from "./NatalAnalysisView";
 import { LanguageSwitch, useI18n } from "./i18n";
 import type { Chart, LocationResult, Planet, Profile, TransitReportEvent, User } from "./types";
 
 type View =
-  "dashboard" | "profiles" | "chart" | "ephemeris" | "forecast" | "synastry" | "astromap" | "admin";
+  "dashboard" | "profiles" | "chart" | "analysis" | "ephemeris" | "forecast" | "synastry" | "astromap" | "admin";
 const blank: Omit<Profile, "id"> = {
   name: "",
   birthDate: "1990-01-01",
@@ -62,7 +65,7 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
   );
 }
 
-function Auth({ onAuth }: { onAuth: (u: User) => void }) {
+function Auth({ onAuth, onContinueGuest }: { onAuth: (u: User) => void; onContinueGuest: () => void }) {
   const {t}=useI18n();
   const [register, setRegister] = useState(false),
     [registrationEnabled, setRegistrationEnabled] = useState(false),
@@ -157,6 +160,9 @@ function Auth({ onAuth }: { onAuth: (u: User) => void }) {
           {(registrationEnabled || register) && <button type="button" className="text-btn" onClick={() => setRegister(!register)}>
             {t(register ? "Already have an account? Sign in" : "New to Asterivum? Create an account")}
           </button>}
+          <button type="button" className="guest-continue" onClick={onContinueGuest}>
+            {t("Continue without an account")}
+          </button>
           <small>{t("By continuing you agree to keep client birth data secure and use interpretations responsibly.")}</small>
         </form>
       </section>
@@ -168,10 +174,14 @@ function ProfileModal({
   profile,
   onClose,
   onSaved,
+  guest = false,
+  onGuestChart,
 }: {
   profile?: Profile;
   onClose: () => void;
   onSaved: () => void;
+  guest?: boolean;
+  onGuestChart?: (profile:Profile) => void;
 }) {
   const {t}=useI18n();
   const [form, setForm] = useState(profile || blank),
@@ -198,14 +208,22 @@ function ProfileModal({
     setSaving(true);
     setError("");
     try {
+      const normalized:Profile = {
+        ...form,
+        id:profile?.id || -1,
+        latitude:Number(form.latitude),
+        longitude:Number(form.longitude),
+        timezone:Number(form.timezone),
+        isPrimary:Boolean(form.isPrimary),
+      };
+      if (guest) {
+        onGuestChart?.(normalized);
+        return;
+      }
       await api(`/profiles${profile ? `/${profile.id}` : ""}`, {
         method: profile ? "PUT" : "POST",
         body: JSON.stringify({
-          ...form,
-          latitude: Number(form.latitude),
-          longitude: Number(form.longitude),
-          timezone: Number(form.timezone),
-          isPrimary: Boolean(form.isPrimary),
+          ...normalized,
         }),
       });
       onSaved();
@@ -287,7 +305,7 @@ function ProfileModal({
         <div className="modal-head">
           <div>
             <p className="eyebrow">{t("Birth data")}</p>
-            <h2>{t(profile ? "Edit profile" : "New client chart")}</h2>
+            <h2>{t(profile ? "Edit profile" : guest ? "Create a guest chart" : "New client chart")}</h2>
           </div>
           <button type="button" className="icon-btn" onClick={onClose}>
             <X />
@@ -430,22 +448,22 @@ function ProfileModal({
               <option value="SIDEREAL">{t("Sidereal (Lahiri approx.)")}</option>
             </select>
           </label>
-          <label className="check">
+          {!guest && <label className="check">
             <input
               type="checkbox"
               checked={Boolean(form.isPrimary)}
               onChange={(e) => field("isPrimary", e.target.checked)}
             />{" "}
             {t("Primary profile")}
-          </label>
-          <label className="span-2">
+          </label>}
+          {!guest && <label className="span-2">
             {t("Private notes")}
             <textarea
               value={form.notes}
               onChange={(e) => field("notes", e.target.value)}
               rows={3}
             />
-          </label>
+          </label>}
         </div>
         <p className="hint">
           {t("Placidus uses exact semi-arc cusps. At polar latitudes, where Placidus is undefined, the chart uses an equal-house fallback.")}
@@ -456,8 +474,8 @@ function ProfileModal({
             {t("Cancel")}
           </button>
           <button className="primary" disabled={saving}>
-            <Save size={16} />
-            {t(saving ? "Saving…" : "Save profile")}
+            {guest ? <Compass size={16} /> : <Save size={16} />}
+            {t(saving ? "Saving…" : guest ? "Calculate chart" : "Save profile")}
           </button>
         </div>
       </form>
@@ -695,10 +713,14 @@ function ChartView({
   profiles,
   selected,
   setSelected,
+  guest = false,
+  onRequireAccount,
 }: {
   profiles: Profile[];
   selected: number | null;
   setSelected: (id: number) => void;
+  guest?: boolean;
+  onRequireAccount?: () => void;
 }) {
   const {t,locale}=useI18n();
   const [mode, setMode] = useState<"NATAL" | "TRANSIT" | "PROGRESSION">(
@@ -712,12 +734,13 @@ function ChartView({
   useEffect(() => {
     if (!profile) return;
     setLoading(true);
-    api<{ chart: Chart }>(
-      `/charts/${profile.id}?mode=${mode}&date=${date}T12:00:00Z`,
-    )
+    const request = guest
+      ? api<{chart:Chart}>("/charts/preview", { method:"POST", body:JSON.stringify({ profile:{...profile,isPrimary:Boolean(profile.isPrimary)}, mode, targetDate:`${date}T12:00:00.000Z` }) })
+      : api<{ chart: Chart }>(`/charts/${profile.id}?mode=${mode}&date=${date}T12:00:00Z`);
+    request
       .then((r) => setChart(r.chart))
       .finally(() => setLoading(false));
-  }, [profile?.id, mode, date]);
+  }, [profile?.id, mode, date, guest]);
   return (
     <>
       <header className="page-head compact">
@@ -728,6 +751,7 @@ function ChartView({
             {profile &&
               `${profile.birthDate} · ${profile.birthTime} · ${profile.place}`}
           </p>
+          {guest && <span className="pill guest-pill">{t("Unsaved guest chart")}</span>}
         </div>
         <div className="head-controls">
           <select
@@ -745,6 +769,7 @@ function ChartView({
             {t("Print")}
           </button>
           <button className="ghost no-print" disabled={!chart} onClick={async () => {
+            if (guest) { onRequireAccount?.(); return; }
             const svg = document.querySelector(".chart-wheel") as SVGSVGElement | null;
             if (chart && svg && profile) {
               const { exportChartPdf } = await import("./pdfExports");
@@ -752,7 +777,7 @@ function ChartView({
             }
           }}>
             <Download size={16} />
-            {t("Export PDF")}
+            {t(guest ? "Unlock PDF export" : "Export PDF")}
           </button>
         </div>
       </header>
@@ -770,7 +795,7 @@ function ChartView({
           </section>
           <div className="chart-toolbar">
             <div className="tabs">
-              {(["NATAL", "TRANSIT", "PROGRESSION"] as const).map((m) => (
+              {(guest ? ["NATAL", "TRANSIT"] as const : ["NATAL", "TRANSIT", "PROGRESSION"] as const).map((m) => (
                 <button
                   className={mode === m ? "active" : ""}
                   onClick={() => setMode(m)}
@@ -1270,12 +1295,30 @@ function Admin() {
   );
 }
 
+function GuestDashboard({onNew,onView,onAccount}:{onNew:()=>void;onView:(view:View)=>void;onAccount:()=>void}) {
+  const {t}=useI18n();
+  return <>
+    <header className="page-head guest-head"><div><p className="eyebrow">{t("Explore Asterivum")}</p><h1>{t("Create a chart without an account")}</h1><p className="muted">{t("Your birth data is used only to calculate this session and is not saved to an account.")}</p></div><button className="primary" onClick={onNew}><Compass size={17}/>{t("Create guest chart")}</button></header>
+    <section className="guest-hero">
+      <div><span className="pill">{t("No account required")}</span><h2>{t("Start with the essential sky")}</h2><p>{t("Search a birthplace, calculate coordinates automatically, and explore a natal or transit wheel with houses, positions and major aspects.")}</p><button className="primary" onClick={onNew}>{t("Calculate my chart")}<ChevronRight size={16}/></button></div>
+      <div className="guest-feature-grid"><article><Compass/><strong>{t("Natal and transit charts")}</strong><span>{t("Interactive wheel and celestial positions")}</span></article><article><Database/><strong>{t("Public ephemeris")}</strong><span>{t("Browse planetary motion by date")}</span><button className="text-btn" onClick={()=>onView("ephemeris")}>{t("Open ephemeris")}</button></article><article><Lock/><strong>{t("Account features")}</strong><span>{t("Save profiles, unlock advanced analysis and export professional documents.")}</span><button className="text-btn" onClick={onAccount}>{t("Sign in or register")}</button></article></div>
+    </section>
+  </>;
+}
+
+function LockedFeature({title,onAccount}:{title:string;onAccount:()=>void}) {
+  const {t}=useI18n();
+  return <section className="locked-feature"><Lock/><p className="eyebrow">{t("Account feature")}</p><h1>{title}</h1><p>{t("Create a free account to save sensitive birth data securely and use detailed calculations, reports and exports.")}</p><button className="primary" onClick={onAccount}><LogIn size={16}/>{t("Sign in or register")}</button><small>{t("Basic chart creation and the ephemeris remain available without an account.")}</small></section>;
+}
+
 export default function App() {
   const {t}=useI18n();
   const [user, setUser] = useState<User | null>(null),
     [checkingSession, setCheckingSession] = useState(true),
+    [authOpen, setAuthOpen] = useState(false),
     [view, setView] = useState<View>("dashboard"),
     [profiles, setProfiles] = useState<Profile[]>([]),
+    [guestProfile, setGuestProfile] = useState<Profile|null>(null),
     [selected, setSelected] = useState<number | null>(null),
     [modal, setModal] = useState(false),
     [menu, setMenu] = useState(false),
@@ -1288,7 +1331,7 @@ export default function App() {
     api<{ user: User }>("/me").then((r) => setUser(r.user)).catch(() => undefined).finally(() => setCheckingSession(false));
   }, []);
   useEffect(() => {
-    if (user) loadProfiles();
+    if (user) loadProfiles(); else setProfiles([]);
   }, [user]);
   const nav = (v: View, id?: number) => {
     setView(v);
@@ -1296,20 +1339,22 @@ export default function App() {
     setMenu(false);
   };
   if (checkingSession) return <main className="auth-shell" aria-busy="true" />;
-  if (!user)
+  if (authOpen)
     return (
       <Auth
-        onAuth={setUser}
+        onAuth={(authenticatedUser)=>{setUser(authenticatedUser);setAuthOpen(false);setView("dashboard");}}
+        onContinueGuest={()=>setAuthOpen(false)}
       />
     );
   const items = [
-    ["dashboard", t("Overview"), LayoutDashboard],
-    ["profiles", t("Birth profiles"), Users],
-    ["chart", t("Chart studio"), Compass],
-    ["ephemeris", t("Ephemeris"), Database],
-    ["forecast", t("Forecasts"), CalendarDays],
-    ["synastry", t("Synastry"), HeartHandshake],
-    ["astromap", t("Astro map"), Globe2],
+    ["dashboard", t("Overview"), LayoutDashboard, false],
+    ["profiles", t("Birth profiles"), Users, true],
+    ["chart", t("Chart studio"), Compass, false],
+    ["analysis", t("Natal analysis"), BookOpen, true],
+    ["ephemeris", t("Ephemeris"), Database, false],
+    ["forecast", t("Forecasts"), CalendarDays, true],
+    ["synastry", t("Synastry"), HeartHandshake, true],
+    ["astromap", t("Astro map"), Globe2, true],
   ] as const;
   return (
     <div className="app-shell">
@@ -1325,7 +1370,7 @@ export default function App() {
           </button>
         </div>
         <nav>
-          {items.map(([v, label, Icon]) => (
+          {items.map(([v, label, Icon, accountRequired]) => (
             <button
               key={v}
               className={view === v ? "active" : ""}
@@ -1333,10 +1378,11 @@ export default function App() {
             >
               <Icon size={19} />
               {label}
+              {!user && accountRequired && <Lock className="nav-lock" size={12}/>}
             </button>
           ))}
         </nav>
-        {user.role === "ADMIN" && (
+        {user?.role === "ADMIN" && (
           <div className="admin-nav">
             <span>{t("Management")}</span>
             <button
@@ -1350,19 +1396,8 @@ export default function App() {
         )}
         <div className="sidebar-language"><LanguageSwitch compact /></div>
         <div className="side-foot">
-          <div className="user-chip">
-            <div className="avatar">{user.name[0]}</div>
-            <div>
-              <strong>{user.name}</strong>
-              <span>{user.email}</span>
-            </div>
-          </div>
-          <button
-            className="logout"
-            onClick={() => { api("/auth/logout", { method:"POST" }).finally(() => setUser(null)); }}
-          >
-            <LogOut size={17} />
-          </button>
+          {user ? <><div className="user-chip"><div className="avatar">{user.name[0]}</div><div><strong>{user.name}</strong><span>{user.email}</span></div></div><button className="logout" onClick={() => { api("/auth/logout", { method:"POST" }).finally(() => {setUser(null);setView("dashboard");}); }}><LogOut size={17} /></button></>
+            : <button className="guest-account-button" onClick={()=>setAuthOpen(true)}><LogIn size={17}/><span><strong>{t("Sign in or register")}</strong><small>{t("Unlock saved and detailed tools")}</small></span></button>}
         </div>
       </aside>
       <main className="main">
@@ -1374,37 +1409,41 @@ export default function App() {
           <span />
         </div>
         <div className="content">
-          {view === "dashboard" && (
-            <Dashboard
+          {view === "dashboard" && (user ? <Dashboard
               profiles={profiles}
               onView={nav}
               onNew={() => setModal(true)}
-            />
+            /> : <GuestDashboard onNew={()=>setModal(true)} onView={nav} onAccount={()=>setAuthOpen(true)}/>
           )}{" "}
           {view === "profiles" && (
-            <Profiles
+            user ? <Profiles
               profiles={profiles}
               reload={loadProfiles}
               onOpenChart={(id) => nav("chart", id)}
-            />
+            /> : <LockedFeature title={t("Birth profiles")} onAccount={()=>setAuthOpen(true)}/>
           )}{" "}
           {view === "chart" && (
-            <ChartView
-              profiles={profiles}
-              selected={selected}
+            user || guestProfile ? <ChartView
+              profiles={user ? profiles : [guestProfile!]}
+              selected={user ? selected : guestProfile!.id}
               setSelected={setSelected}
-            />
+              guest={!user}
+              onRequireAccount={()=>setAuthOpen(true)}
+            /> : <section className="locked-feature guest-chart-empty"><Compass/><p className="eyebrow">{t("No account required")}</p><h1>{t("Create your guest chart")}</h1><p>{t("Enter birth details to calculate a natal or transit chart without saving personal data.")}</p><button className="primary" onClick={()=>setModal(true)}>{t("Create guest chart")}</button></section>
           )}{" "}
+          {view === "analysis" && (user ? <NatalAnalysisView profiles={profiles} /> : <LockedFeature title={t("Natal analysis")} onAccount={()=>setAuthOpen(true)}/>)}{" "}
           {view === "ephemeris" && <Ephemeris />}{" "}
-          {view === "forecast" && <Forecast profiles={profiles} />}{" "}
-          {view === "synastry" && <SynastryView profiles={profiles} />}{" "}
-          {view === "astromap" && <AstroMapView profiles={profiles} />}{" "}
-          {view === "admin" && user.role === "ADMIN" && <Admin />}
+          {view === "forecast" && (user ? <Forecast profiles={profiles} /> : <LockedFeature title={t("Forecasts")} onAccount={()=>setAuthOpen(true)}/>)}{" "}
+          {view === "synastry" && (user ? <SynastryView profiles={profiles} /> : <LockedFeature title={t("Synastry")} onAccount={()=>setAuthOpen(true)}/>)}{" "}
+          {view === "astromap" && (user ? <AstroMapView profiles={profiles} /> : <LockedFeature title={t("Astro map")} onAccount={()=>setAuthOpen(true)}/>)}{" "}
+          {view === "admin" && user?.role === "ADMIN" && <Admin />}
         </div>
       </main>
       {modal && (
         <ProfileModal
           onClose={() => setModal(false)}
+          guest={!user}
+          onGuestChart={(profile)=>{setGuestProfile(profile);setModal(false);nav("chart",profile.id);}}
           onSaved={() => {
             setModal(false);
             loadProfiles();

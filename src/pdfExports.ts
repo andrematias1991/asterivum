@@ -1,16 +1,19 @@
 import { jsPDF } from "jspdf";
-import type { Chart, Profile, TransitReportEvent } from "./types";
+import type { Chart, NatalAnalysis, Profile, TransitReportEvent } from "./types";
 
 const safeName = (value:string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "asterivum";
 const isPortuguese = () => localStorage.getItem('asterivum_language') === 'pt-PT';
 const text = (english:string, portuguese:string) => isPortuguese() ? portuguese : english;
+const astrologyPt:Record<string,string>={Sun:'Sol',Moon:'Lua',Mercury:'Mercúrio',Venus:'Vénus',Mars:'Marte',Jupiter:'Júpiter',Saturn:'Saturno',Uranus:'Urano',Neptune:'Neptuno',Pluto:'Plutão',Node:'Nodo Norte',Ascendant:'Ascendente',Descendant:'Descendente',Midheaven:'Meio do Céu',IC:'Fundo do Céu',Aries:'Carneiro',Taurus:'Touro',Gemini:'Gémeos',Cancer:'Caranguejo',Leo:'Leão',Virgo:'Virgem',Libra:'Balança',Scorpio:'Escorpião',Sagittarius:'Sagitário',Capricorn:'Capricórnio',Aquarius:'Aquário',Pisces:'Peixes',Fire:'Fogo',Earth:'Terra',Air:'Ar',Water:'Água',Cardinal:'Cardinal',Fixed:'Fixa',Mutable:'Mutável',Active:'Ativa',Receptive:'Recetiva',Conjunction:'Conjunção',Sextile:'Sextil',Square:'Quadratura',Trine:'Trígono',Opposition:'Oposição','New Moon':'Lua Nova',Crescent:'Crescente','First Quarter':'Quarto Crescente',Gibbous:'Gibosa','Full Moon':'Lua Cheia',Disseminating:'Disseminante','Last Quarter':'Quarto Minguante',Balsamic:'Balsâmica','Modern domicile':'Domicílio moderno','Modern detriment':'Exílio moderno'};
+const astrologyText=(value:string)=>isPortuguese()?(astrologyPt[value]||value):value;
 const dateText = (value:string) => new Date(value).toLocaleDateString(isPortuguese()?'pt-PT':'en-GB', { day:"2-digit", month:"short", year:"numeric" });
 const pageWidth = 297;
 const pageHeight = 210;
 
 function header(doc:jsPDF, title:string, subtitle:string) {
+  const width=doc.internal.pageSize.getWidth();
   doc.setFillColor(31, 24, 37);
-  doc.rect(0, 0, pageWidth, 25, "F");
+  doc.rect(0, 0, width, 25, "F");
   doc.setTextColor(224, 199, 134);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
@@ -25,11 +28,12 @@ function header(doc:jsPDF, title:string, subtitle:string) {
 }
 
 function footer(doc:jsPDF, page:number, total:number) {
+  const width=doc.internal.pageSize.getWidth(), height=doc.internal.pageSize.getHeight();
   doc.setDrawColor(220, 213, 203);
-  doc.line(12, pageHeight - 10, pageWidth - 12, pageHeight - 10);
+  doc.line(12, height - 10, width - 12, height - 10);
   doc.setTextColor(125, 117, 127);
   doc.setFontSize(7);
-  doc.text(`Asterivum Astrology - ${text('Page','Página')} ${page} ${text('of','de')} ${total}`, pageWidth - 12, pageHeight - 6, { align:"right" });
+  doc.text(`Asterivum Astrology - ${text('Page','Página')} ${page} ${text('of','de')} ${total}`, width - 12, height - 6, { align:"right" });
 }
 
 async function svgImage(svg:SVGSVGElement) {
@@ -139,4 +143,62 @@ export function exportTransitPdf(profile:Profile, events:TransitReportEvent[], p
   for (let index = 1; index <= total; index++) { doc.setPage(index); footer(doc, index, total); }
   doc.setProperties({ title:`${profile.name} - Transit report`, subject:"Astrology transit report", author:"Asterivum Astrology", creator:"Asterivum Astrology" });
   doc.save(`${safeName(profile.name)}-transit-report.pdf`);
+}
+
+export function exportNatalAnalysisPdf(profile:Profile, analysis:NatalAnalysis) {
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
+  const width=210,height=297,margin=14,contentWidth=width-margin*2;
+  const subtitle=`${profile.birthDate} - ${profile.birthTime} - ${profile.place} - ${profile.houseSystem.replace('_',' ')}`;
+  const title=`${profile.name} - ${text('Natal Technical Dossier','Dossiê Técnico Natal')}`;
+  let page=1,y=39;
+  const newPage=()=>{doc.addPage();page+=1;header(doc,title,subtitle);y=39;};
+  const section=(label:string)=>{if(y>height-25)newPage();doc.setTextColor(95,57,77);doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text(label,margin,y);y+=7;};
+  const line=(label:string,value:string)=>{if(y>height-17)newPage();doc.setFontSize(8);doc.setTextColor(55,49,57);doc.setFont('helvetica','bold');doc.text(label,margin,y);doc.setFont('helvetica','normal');doc.text(value,58,y);y+=5;};
+  const paragraph=(label:string,value:string)=>{
+    if(y>height-35)newPage();
+    doc.setTextColor(65,57,67);doc.setFont('helvetica','bold');doc.setFontSize(9);doc.text(label,margin,y);y+=5;
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    const lines=doc.splitTextToSize(value,contentWidth) as string[];
+    lines.forEach(valueLine=>{if(y>height-17)newPage();doc.text(valueLine,margin,y);y+=4;});y+=3;
+  };
+  const dignityLabel=(status:string)=>text(status,status==='Domicile'?'Domicílio':status==='Detriment'?'Exílio':status==='Exaltation'?'Exaltação':status==='Fall'?'Queda':status==='Neutral'?'Neutro':astrologyText(status));
+  header(doc,title,subtitle);
+
+  section(text('Core identification','Identificação principal'));
+  line(text('Chart signature','Assinatura do mapa'),analysis.signature.sign?astrologyText(analysis.signature.sign):text('Mixed','Mista'));
+  line(text('Chart ruler','Regente do mapa'),`${astrologyText(analysis.chartRuler.name)} - ${astrologyText(analysis.chartRuler.placement.sign)} - ${text('house','casa')} ${analysis.chartRuler.placement.house}`);
+  line(text('Lunation phase','Fase de lunação'),`${astrologyText(analysis.lunation.phase)} - ${analysis.lunation.elongation.toFixed(2)} ${text('deg','graus')}`);
+  line(text('Dominant elements','Elementos dominantes'),analysis.elements.dominant.map(astrologyText).join(', '));
+  line(text('Dominant modalities','Modalidades dominantes'),analysis.modalities.dominant.map(astrologyText).join(', '));
+  line(text('Least represented','Menos representado'),analysis.elements.deficient.map(astrologyText).join(', '));
+  y+=3;section(text('Planet - Sign - House','Planeta - Signo - Casa'));
+  doc.setFontSize(7.2);
+  analysis.planets.forEach(planet=>{
+    if(y>height-18)newPage();
+    doc.setFont('helvetica','bold');doc.setTextColor(47,40,49);doc.text(astrologyText(planet.name),margin,y);
+    doc.setFont('helvetica','normal');doc.text(`${planet.degree}° ${String(planet.minute).padStart(2,'0')} min ${astrologyText(planet.sign)}`,55,y);doc.text(`${text('House','Casa')} ${planet.house}`,112,y);doc.text(dignityLabel(planet.dignity.status),150,y);y+=5;
+  });
+
+  newPage();section(text('Chart structure','Estrutura do mapa'));
+  line(text('Elements','Elementos'),Object.entries(analysis.elements.counts).map(([name,count])=>`${astrologyText(name)} ${count}`).join('  ·  '));
+  line(text('Modalities','Modalidades'),Object.entries(analysis.modalities.counts).map(([name,count])=>`${astrologyText(name)} ${count}`).join('  ·  '));
+  line(text('Polarity','Polaridade'),Object.entries(analysis.polarities.counts).map(([name,count])=>`${astrologyText(name)} ${count}`).join('  ·  '));
+  line(text('Horizon','Horizonte'),`${text('Above','Acima')} ${analysis.hemispheres.above}  ·  ${text('Below','Abaixo')} ${analysis.hemispheres.below}`);
+  line(text('Hemispheres','Hemisférios'),`${text('Eastern','Oriental')} ${analysis.hemispheres.eastern}  ·  ${text('Western','Ocidental')} ${analysis.hemispheres.western}`);
+  line(text('Quadrants','Quadrantes'),analysis.quadrants.map(item=>`${item.number}: ${item.count}`).join('  ·  '));
+  y+=3;section(text('Angles and rulers','Ângulos e regentes'));
+  analysis.angles.forEach(angle=>line(astrologyText(angle.name),`${angle.degree}° ${String(angle.minute).padStart(2,'0')} min ${astrologyText(angle.sign)}  ·  ${text('Ruler','Regente')}: ${astrologyText(angle.ruler)}${angle.modernCoRuler?` + ${astrologyText(angle.modernCoRuler)}`:''}`));
+  y+=3;section(text('House rulers','Regentes das casas'));
+  analysis.houseRulers.forEach(item=>line(`${text('House','Casa')} ${item.house}`,`${astrologyText(item.sign)}  ·  ${astrologyText(item.ruler)}${item.modernCoRuler?` + ${astrologyText(item.modernCoRuler)}`:''}`));
+
+  newPage();section(text('Significant aspects','Aspetos significativos'));
+  analysis.significantAspects.slice(0,12).forEach(aspect=>line(`${astrologyText(aspect.from)} ${astrologyText(aspect.type).toLowerCase()} ${astrologyText(aspect.to)}`,`${aspect.orb.toFixed(2)}° ${text('orb','orbe')} - ${aspect.significance}/100`));
+  y+=4;section(text('Calculation notes','Notas de cálculo'));
+  paragraph(text('Methodology','Metodologia'),`${analysis.methodology.dominanceBodies}. ${analysis.methodology.rulership}. ${analysis.methodology.node}. ${analysis.methodology.dignities}.`);
+  paragraph(text('Scope','Âmbito'),text('This dossier contains calculated chart factors and no automated personal interpretation. The astrologer remains responsible for synthesis and consultation context.','Este dossiê contém fatores calculados do mapa e não inclui interpretação pessoal automatizada. O astrólogo mantém a responsabilidade pela síntese e pelo contexto da consulta.'));
+
+  const total=page;
+  for(let index=1;index<=total;index+=1){doc.setPage(index);footer(doc,index,total);}
+  doc.setProperties({title,subject:'Natal technical dossier',author:'Asterivum Astrology',creator:'Asterivum Astrology'});
+  doc.save(`${safeName(profile.name)}-natal-technical-dossier.pdf`);
 }

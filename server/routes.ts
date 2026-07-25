@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { db, transaction } from './db.js';
-import { createSession, csrfToken, destroySession, requireAdmin, requireAuth, requireCsrf } from './auth.js';
+import { createMobileSession, createSession, csrfToken, destroySession, requireAdmin, requireAuth, requireCsrf } from './auth.js';
 import { config } from './config.js';
 import { astrocartography, calculateChart, calculateSynastry, ephemeris, forecast, transitReport, TRANSIT_ASPECT_NAMES, utcOffsetAtLocalTime } from './astro.js';
 import { calculateNatalAnalysis } from './natalAnalysis.js';
@@ -14,7 +14,7 @@ const credentials = z.object({ email:z.email(), password:z.string().min(12).max(
 const profileSchema = z.object({
   name:z.string().min(1).max(100), birthDate:z.iso.date(), birthTime:z.string().regex(/^\d{2}:\d{2}$/),
   place:z.string().min(2).max(150), latitude:z.number().min(-90).max(90), longitude:z.number().min(-180).max(180),
-  timezone:z.number().min(-14).max(14), timezoneId:z.string().trim().min(1).max(80).nullable().optional().default(null), houseSystem:z.enum(['PLACIDUS','WHOLE_SIGN','EQUAL']).default('PLACIDUS'),
+  timezone:z.number().min(-14).max(14).optional(), timezoneId:z.string().trim().min(1).max(80), houseSystem:z.enum(['PLACIDUS','WHOLE_SIGN','EQUAL']).default('PLACIDUS'),
   zodiac:z.enum(['TROPICAL','SIDEREAL']).default('TROPICAL'), notes:z.string().max(4000).default(''), isPrimary:z.boolean().default(false),
 });
 const previewChartSchema = z.object({
@@ -29,6 +29,13 @@ type GeocodingResult = {
   admin1?:string; timezone?:string;
 };
 const locationCache = new Map<string, { expires:number; results:unknown[] }>();
+
+function withAutomaticTimezone(profile:z.infer<typeof profileSchema>) {
+  return {
+    ...profile,
+    timezone:utcOffsetAtLocalTime(profile.birthDate,profile.birthTime,profile.timezoneId),
+  };
+}
 
 function safeUser(row: Record<string, unknown>) {
   return { id:row.id, email:row.email, name:row.name, role:row.role, status:row.status, createdAt:row.created_at };
@@ -88,6 +95,10 @@ api.post('/auth/register', async (req,res) => {
     throw error;
   }
   const user: AuthUser = { id:result.insertId, email, name:parsed.data.name, role:'USER' };
+  if (req.get('x-client-platform') === 'mobile') {
+    const sessionToken=await createMobileSession(user,req.get('user-agent'));
+    return res.status(201).json({user,sessionToken});
+  }
   const csrf = await createSession(res, user, req.get('user-agent'));
   res.status(201).json({ user,csrfToken:csrf });
 });
@@ -98,6 +109,10 @@ api.post('/auth/login', async (req,res) => {
   const row = await db.first<Record<string,unknown>>('SELECT * FROM users WHERE email=?', [parsed.data.email.toLowerCase()]);
   if (!row || row.status !== 'ACTIVE' || !await bcrypt.compare(parsed.data.password, String(row.password_hash))) return res.status(401).json({ error:'Email or password is incorrect' });
   const user = safeUser(row) as AuthUser;
+  if (req.get('x-client-platform') === 'mobile') {
+    const sessionToken=await createMobileSession(user,req.get('user-agent'));
+    return res.json({user,sessionToken});
+  }
   const csrf = await createSession(res, user, req.get('user-agent'));
   res.json({ user,csrfToken:csrf });
 });
@@ -114,7 +129,9 @@ api.get('/profiles', requireAuth, async (req:AuthedRequest,res) => {
 api.post('/profiles', requireAuth, requireCsrf, async (req:AuthedRequest,res) => {
   const parsed = profileSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error:'Birth profile is incomplete or invalid', details:z.flattenError(parsed.error) });
-  const p = parsed.data;
+  let p;
+  try { p=withAutomaticTimezone(parsed.data); }
+  catch { return res.status(400).json({ error:'The selected location has an invalid time zone' }); }
   const result = await transaction(async tx => {
     if (p.isPrimary) await tx.execute('UPDATE birth_profiles SET is_primary=0 WHERE user_id=?', [req.user!.id]);
     return tx.execute(`INSERT INTO birth_profiles(user_id,name,birth_date,birth_time,place,latitude,longitude,timezone,timezone_id,house_system,zodiac,notes,is_primary)
@@ -126,7 +143,10 @@ api.post('/profiles', requireAuth, requireCsrf, async (req:AuthedRequest,res) =>
 api.put('/profiles/:id', requireAuth, requireCsrf, async (req:AuthedRequest,res) => {
   const parsed = profileSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error:'Birth profile is incomplete or invalid' });
-  const p = parsed.data, id = Number(req.params.id);
+  let p;
+  try { p=withAutomaticTimezone(parsed.data); }
+  catch { return res.status(400).json({ error:'The selected location has an invalid time zone' }); }
+  const id = Number(req.params.id);
   const result = await transaction(async tx => {
     if (!await tx.first('SELECT id FROM birth_profiles WHERE id=? AND user_id=?', [id,req.user!.id])) return { insertId:0, affectedRows:0 };
     if (p.isPrimary) await tx.execute('UPDATE birth_profiles SET is_primary=0 WHERE user_id=?', [req.user!.id]);
@@ -169,7 +189,11 @@ api.post('/charts/preview', (req,res) => {
   const parsed = previewChartSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error:'Birth profile is incomplete or invalid', details:z.flattenError(parsed.error) });
   const target = parsed.data.targetDate ? new Date(parsed.data.targetDate) : undefined;
-  res.json({ chart:calculateChart(parsed.data.profile,parsed.data.mode,target) });
+  try {
+    res.json({ chart:calculateChart(withAutomaticTimezone(parsed.data.profile),parsed.data.mode,target) });
+  } catch {
+    res.status(400).json({ error:'The selected location has an invalid time zone' });
+  }
 });
 
 api.get('/charts/:id', requireAuth, async (req:AuthedRequest,res) => {

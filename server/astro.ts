@@ -1,8 +1,9 @@
 import { Body, Ecliptic, EquatorFromVector, GeoVector, RotateVector, Rotation_EQJ_EQD, SiderealTime } from 'astronomy-engine';
 import type { BirthData } from './types.js';
+import { chironGeocentricVector, chironLongitude, meanLilithLongitude } from './minorBodies.js';
 
 export const SIGNS = ['Aries','Taurus','Gemini','Cancer','Leo','Virgo','Libra','Scorpio','Sagittarius','Capricorn','Aquarius','Pisces'];
-export const GLYPHS: Record<string, string> = { Sun:'☉', Moon:'☽', Mercury:'☿', Venus:'♀', Mars:'♂', Jupiter:'♃', Saturn:'♄', Uranus:'♅', Neptune:'♆', Pluto:'♇', Node:'☊' };
+export const GLYPHS: Record<string, string> = { Sun:'☉', Moon:'☽', Mercury:'☿', Venus:'♀', Mars:'♂', Jupiter:'♃', Saturn:'♄', Uranus:'♅', Neptune:'♆', Pluto:'♇', Node:'☊', Chiron:'⚷', Lilith:'⚸' };
 const BODIES = [Body.Sun, Body.Moon, Body.Mercury, Body.Venus, Body.Mars, Body.Jupiter, Body.Saturn, Body.Uranus, Body.Neptune, Body.Pluto];
 const ASPECTS = [
   { name:'Conjunction', angle:0, orb:8, glyph:'☌' }, { name:'Sextile', angle:60, orb:4, glyph:'⚹' },
@@ -19,7 +20,7 @@ export function birthToUtc(data: BirthData): Date {
   const [hh,mm] = data.birthTime.split(':').map(Number);
   const offset = data.timezoneId
     ? utcOffsetAtLocalTime(data.birthDate, data.birthTime, data.timezoneId)
-    : data.timezone;
+    : data.timezone ?? 0;
   return new Date(Date.UTC(y, m - 1, d, hh - offset, mm || 0));
 }
 
@@ -27,12 +28,33 @@ export function utcOffsetAtLocalTime(date:string, time:string, timeZone:string) 
   const [year,month,day] = date.split('-').map(Number);
   const [hour,minute] = time.split(':').map(Number);
   const wallTimeAsUtc = Date.UTC(year, month - 1, day, hour, minute || 0);
-  const parts = new Intl.DateTimeFormat('en-CA', {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone, year:'numeric', month:'2-digit', day:'2-digit',
     hour:'2-digit', minute:'2-digit', hourCycle:'h23',
-  }).formatToParts(new Date(wallTimeAsUtc));
-  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
-  return (Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), Number(values.hour), Number(values.minute)) - wallTimeAsUtc) / 3600000;
+  });
+  const localParts = (instant:number) => {
+    const values = Object.fromEntries(formatter.formatToParts(new Date(instant)).map(part => [part.type, part.value]));
+    return {
+      year:Number(values.year), month:Number(values.month), day:Number(values.day),
+      hour:Number(values.hour), minute:Number(values.minute),
+    };
+  };
+  const offsets = new Set<number>();
+  for (let delta=-48;delta<=48;delta+=6) {
+    const instant=wallTimeAsUtc+delta*3600000;
+    const local=localParts(instant);
+    offsets.add((Date.UTC(local.year,local.month-1,local.day,local.hour,local.minute)-instant)/3600000);
+  }
+  const candidates=[...offsets].map(offset=>({
+    offset,
+    instant:wallTimeAsUtc-offset*3600000,
+  })).filter(({instant})=>{
+    const local=localParts(instant);
+    return local.year===year&&local.month===month&&local.day===day&&local.hour===hour&&local.minute===(minute||0);
+  }).sort((a,b)=>a.instant-b.instant);
+  if(!candidates.length) throw new RangeError('Local time does not exist in this timezone');
+  // During a fall-back overlap, use the earlier occurrence (Temporal-compatible behaviour).
+  return candidates[0].offset;
 }
 
 function meanNode(date: Date) {
@@ -154,6 +176,11 @@ export function calculateSky(date: Date, zodiac: BirthData['zodiac'] = 'TROPICAL
     return position(body, lon, motion < 0);
   });
   planets.push(position('Node', meanNode(date) - ayanamsa, true));
+  const chironBefore = chironLongitude(new Date(date.getTime() - 6 * 3600000));
+  const chironAfter = chironLongitude(new Date(date.getTime() + 6 * 3600000));
+  const chironMotion = ((chironAfter - chironBefore + 540) % 360) - 180;
+  planets.push(position('Chiron', chironLongitude(date) - ayanamsa, chironMotion < 0));
+  planets.push(position('Lilith', meanLilithLongitude(date) - ayanamsa));
   return planets;
 }
 
@@ -185,7 +212,12 @@ export function calculateSynastry(first:BirthData, second:BirthData, language:'e
   const secondChart = calculateChart(second);
   const aspects = aspectsBetween(secondChart.natal, firstChart.natal, true);
   const relational = new Set(['Sun','Moon','Mercury','Venus','Mars','Saturn']);
-  const weighted = aspects.filter(aspect => relational.has(String(aspect.from)) || relational.has(String(aspect.to)));
+  const supplementary = new Set(['Chiron','Lilith']);
+  const weighted = aspects.filter(aspect =>
+    !supplementary.has(String(aspect.from))
+    && !supplementary.has(String(aspect.to))
+    && (relational.has(String(aspect.from)) || relational.has(String(aspect.to))),
+  );
   const harmony = weighted.filter(aspect => ['Trine','Sextile'].includes(String(aspect.type))).length;
   const tension = weighted.filter(aspect => ['Square','Opposition'].includes(String(aspect.type))).length;
   const conjunctions = weighted.filter(aspect => aspect.type === 'Conjunction').length;
@@ -207,15 +239,33 @@ export function astrocartography(data:BirthData) {
   const date = birthToUtc(data);
   const gst = SiderealTime(date) * 15;
   const lines:Array<{planet:string;glyph:string;angle:'MC'|'IC'|'ASC'|'DSC';points:{latitude:number;longitude:number}[]}> = [];
-  for (const body of BODIES) {
-    const equatorial = EquatorFromVector(RotateVector(Rotation_EQJ_EQD(date),GeoVector(body,date,true)));
-    const rightAscension = equatorial.ra * 15;
-    const declination = equatorial.dec * Math.PI / 180;
+  const mapBodies = [...BODIES.map(body => ({name:String(body), vector:GeoVector(body,date,true)})), {
+    name:'Chiron', vector:chironGeocentricVector(date),
+  }];
+  const pointObjects = [
+    {name:'Node', longitude:meanNode(date)},
+    {name:'Lilith', longitude:meanLilithLongitude(date)},
+  ];
+  const coordinates = [
+    ...mapBodies.map(({name,vector}) => {
+      const equatorial = EquatorFromVector(RotateVector(Rotation_EQJ_EQD(date),vector));
+      return {name,rightAscension:equatorial.ra * 15,declination:equatorial.dec * Math.PI / 180};
+    }),
+    ...pointObjects.map(({name,longitude}) => {
+      const lambda=longitude*Math.PI/180, epsilon=obliquity(date)*Math.PI/180;
+      return {
+        name,
+        rightAscension:normalize(Math.atan2(Math.sin(lambda)*Math.cos(epsilon),Math.cos(lambda))*180/Math.PI),
+        declination:Math.asin(Math.sin(epsilon)*Math.sin(lambda)),
+      };
+    }),
+  ];
+  for (const {name,rightAscension,declination} of coordinates) {
     const meridian = normalize(rightAscension - gst + 180) - 180;
-    lines.push({ planet:String(body),glyph:GLYPHS[String(body)],angle:'MC',points:[{latitude:-85,longitude:meridian},{latitude:85,longitude:meridian}] });
-    lines.push({ planet:String(body),glyph:GLYPHS[String(body)],angle:'IC',points:[{latitude:-85,longitude:normalize(meridian+360)-180},{latitude:85,longitude:normalize(meridian+360)-180}] });
+    lines.push({ planet:name,glyph:GLYPHS[name],angle:'MC',points:[{latitude:-85,longitude:meridian},{latitude:85,longitude:meridian}] });
+    lines.push({ planet:name,glyph:GLYPHS[name],angle:'IC',points:[{latitude:-85,longitude:normalize(meridian+360)-180},{latitude:85,longitude:normalize(meridian+360)-180}] });
     const asc:{latitude:number;longitude:number}[] = [], dsc:{latitude:number;longitude:number}[] = [];
-    for (let latitude=-66; latitude<=66; latitude+=2) {
+    for (let latitude=-66; latitude<=66; latitude+=0.5) {
       const lat = latitude * Math.PI / 180;
       const cosine = -Math.tan(lat) * Math.tan(declination);
       if (Math.abs(cosine) > 1) continue;
@@ -223,8 +273,8 @@ export function astrocartography(data:BirthData) {
       asc.push({latitude,longitude:normalize(rightAscension-hourAngle-gst+180)-180});
       dsc.push({latitude,longitude:normalize(rightAscension+hourAngle-gst+180)-180});
     }
-    lines.push({planet:String(body),glyph:GLYPHS[String(body)],angle:'ASC',points:asc});
-    lines.push({planet:String(body),glyph:GLYPHS[String(body)],angle:'DSC',points:dsc});
+    lines.push({planet:name,glyph:GLYPHS[name],angle:'ASC',points:asc});
+    lines.push({planet:name,glyph:GLYPHS[name],angle:'DSC',points:dsc});
   }
   return { date:date.toISOString(), birthplace:{latitude:data.latitude,longitude:data.longitude,place:data.place}, lines };
 }
@@ -285,12 +335,14 @@ const transitThemes:Record<string,string> = {
   Mars:'drive, assertion, conflict and decisive action', Jupiter:'growth, opportunity, confidence and meaning',
   Saturn:'responsibility, limits, maturity and durable structure', Uranus:'liberation, disruption, experimentation and awakening',
   Neptune:'imagination, sensitivity, ideals and dissolving boundaries', Pluto:'power, endings, regeneration and deep psychological change',
+  Chiron:'vulnerability, healing, mentorship and integration', Lilith:'autonomy, exclusion, instinct and unedited truth',
 };
 const natalThemes:Record<string,string> = {
   Sun:'identity and life purpose', Moon:'emotional security and instinctive needs', Mercury:'mind and communication style',
   Venus:'relationships, values and receptivity', Mars:'will, desire and self-assertion', Jupiter:'beliefs, confidence and growth pattern',
   Saturn:'duties, fears and capacity for mastery', Uranus:'need for freedom and originality', Neptune:'ideals, imagination and sensitivity',
   Pluto:'relationship with power and transformation', Node:'developmental direction and recurring life lessons',
+  Chiron:'vulnerability, repair and the capacity to guide others', Lilith:'autonomy, instinct and disowned or uncompromising material',
 };
 const aspectLanguage:Record<string,string> = {
   Conjunction:'merges and intensifies these two principles', Sextile:'opens a constructive opportunity that grows through deliberate participation',
@@ -301,16 +353,16 @@ const houseThemes = ['identity, body and self-direction','income, skills and per
 const ordinal = (value:number) => `${value}${value===1?'st':value===2?'nd':value===3?'rd':'th'}`;
 
 const transitThemesPt:Record<string,string> = {
-  Sun:'visibilidade, vitalidade, propósito e direção consciente', Moon:'necessidades emocionais, hábitos, pertença e resposta quotidiana', Mercury:'pensamento, decisões, mensagens e aprendizagem', Venus:'relações, valores, prazer e recursos', Mars:'impulso, afirmação, conflito e ação decisiva', Jupiter:'crescimento, oportunidade, confiança e sentido', Saturn:'responsabilidade, limites, maturidade e estrutura duradoura', Uranus:'libertação, rutura, experimentação e despertar', Neptune:'imaginação, sensibilidade, ideais e dissolução de limites', Pluto:'poder, finais, regeneração e transformação psicológica profunda',
+  Sun:'visibilidade, vitalidade, propósito e direção consciente', Moon:'necessidades emocionais, hábitos, pertença e resposta quotidiana', Mercury:'pensamento, decisões, mensagens e aprendizagem', Venus:'relações, valores, prazer e recursos', Mars:'impulso, afirmação, conflito e ação decisiva', Jupiter:'crescimento, oportunidade, confiança e sentido', Saturn:'responsabilidade, limites, maturidade e estrutura duradoura', Uranus:'libertação, rutura, experimentação e despertar', Neptune:'imaginação, sensibilidade, ideais e dissolução de limites', Pluto:'poder, finais, regeneração e transformação psicológica profunda', Chiron:'vulnerabilidade, cura, mentoria e integração', Lilith:'autonomia, exclusão, instinto e verdade sem filtros',
 };
 const natalThemesPt:Record<string,string> = {
-  Sun:'identidade e propósito de vida', Moon:'segurança emocional e necessidades instintivas', Mercury:'mente e estilo de comunicação', Venus:'relações, valores e recetividade', Mars:'vontade, desejo e autoafirmação', Jupiter:'crenças, confiança e padrão de crescimento', Saturn:'deveres, receios e capacidade de domínio', Uranus:'necessidade de liberdade e originalidade', Neptune:'ideais, imaginação e sensibilidade', Pluto:'relação com o poder e a transformação', Node:'direção evolutiva e aprendizagens recorrentes',
+  Sun:'identidade e propósito de vida', Moon:'segurança emocional e necessidades instintivas', Mercury:'mente e estilo de comunicação', Venus:'relações, valores e recetividade', Mars:'vontade, desejo e autoafirmação', Jupiter:'crenças, confiança e padrão de crescimento', Saturn:'deveres, receios e capacidade de domínio', Uranus:'necessidade de liberdade e originalidade', Neptune:'ideais, imaginação e sensibilidade', Pluto:'relação com o poder e a transformação', Node:'direção evolutiva e aprendizagens recorrentes', Chiron:'vulnerabilidade, reparação e capacidade de orientar outras pessoas', Lilith:'autonomia, instinto e material rejeitado ou intransigente',
 };
 const aspectLanguagePt:Record<string,string> = {
   Conjunction:'funde e intensifica estes dois princípios', Sextile:'abre uma oportunidade construtiva que cresce através da participação deliberada', Square:'cria fricção produtiva e exige um ajustamento concreto', Trine:'permite que as energias cooperem naturalmente, embora o uso consciente evite a complacência', Opposition:'leva a tensão às relações ou circunstâncias externas e pede equilíbrio',
 };
 const houseThemesPt = ['identidade, corpo e autodireção','rendimentos, competências e valores pessoais','aprendizagem, comunicação e ambiente próximo','lar, família e bases emocionais','criatividade, romance, filhos e autoexpressão','trabalho, saúde, prática e sistemas quotidianos','parcerias, contratos e encontros individuais','recursos partilhados, intimidade, perda e renovação','viagens, ensino superior, crenças e perspetiva','carreira, reputação, autoridade e contributo público','comunidade, aliados, redes e planos futuros','descanso, retiro, finais, espiritualidade e inconsciente'];
-const astrologyPt:Record<string,string> = { Sun:'Sol',Moon:'Lua',Mercury:'Mercúrio',Venus:'Vénus',Mars:'Marte',Jupiter:'Júpiter',Saturn:'Saturno',Uranus:'Urano',Neptune:'Neptuno',Pluto:'Plutão',Node:'Nodo',Aries:'Carneiro',Taurus:'Touro',Gemini:'Gémeos',Cancer:'Caranguejo',Leo:'Leão',Virgo:'Virgem',Libra:'Balança',Scorpio:'Escorpião',Sagittarius:'Sagitário',Capricorn:'Capricórnio',Aquarius:'Aquário',Pisces:'Peixes',Conjunction:'conjunção',Sextile:'sextil',Square:'quadratura',Trine:'trígono',Opposition:'oposição' };
+const astrologyPt:Record<string,string> = { Sun:'Sol',Moon:'Lua',Mercury:'Mercúrio',Venus:'Vénus',Mars:'Marte',Jupiter:'Júpiter',Saturn:'Saturno',Uranus:'Urano',Neptune:'Neptuno',Pluto:'Plutão',Node:'Nodo',Chiron:'Quíron',Lilith:'Lilith',Aries:'Carneiro',Taurus:'Touro',Gemini:'Gémeos',Cancer:'Caranguejo',Leo:'Leão',Virgo:'Virgem',Libra:'Balança',Scorpio:'Escorpião',Sagittarius:'Sagitário',Capricorn:'Capricórnio',Aquarius:'Aquário',Pisces:'Peixes',Conjunction:'conjunção',Sextile:'sextil',Square:'quadratura',Trine:'trígono',Opposition:'oposição' };
 
 function transitInterpretation(transitPlanet:string, aspect:string, natalPlanet:string, sign:string, house:number, language:'en'|'pt-PT'='en') {
   if (language === 'pt-PT') return `${astrologyPt[transitPlanet] || transitPlanet} enfatiza ${transitThemesPt[transitPlanet] || 'mudança e desenvolvimento'}. Em ${astrologyPt[sign] || sign} e na casa ${house}, isto manifesta-se através de ${houseThemesPt[house-1]}. O aspeto ${astrologyPt[aspect] || aspect.toLowerCase()} ${aspectLanguagePt[aspect] || 'liga estes temas'} ao ${astrologyPt[natalPlanet] || natalPlanet} natal, descrevendo ${natalThemesPt[natalPlanet] || 'um padrão natal pessoal'}. Considere as datas mais fortes e exatas como picos de um processo mais longo, não como acontecimentos isolados.`;
@@ -329,7 +381,7 @@ export function transitReport(
   const selectedAspects = ASPECTS.filter(aspect => !options.aspects?.length || options.aspects.includes(aspect.name));
   const natalChart = calculateChart(data);
   const natal = natalChart.natal;
-  const slowPlanets = new Set(['Jupiter','Saturn','Uranus','Neptune','Pluto']);
+  const slowPlanets = new Set(['Jupiter','Saturn','Uranus','Neptune','Pluto','Chiron']);
   const stepHours = scope === 'ALL' ? 6 : 12;
   const stepMs = stepHours * 3600000;
   const active = new Map<string, ActiveTransit>();

@@ -12,6 +12,10 @@
     "start": "node build/server/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "mobile:start": "npm --prefix apps/mobile start",
+    "mobile:typecheck": "npm --prefix apps/mobile run typecheck",
+    "mobile:doctor": "npm --prefix apps/mobile run doctor",
+    "mobile:test": "npm --prefix apps/mobile test",
     "seed": "node --import tsx server/seed.ts"
   },
   "dependencies": {
@@ -29,6 +33,7 @@
     "mysql2": "^3.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-zoom-pan-pinch": "^4.0.3",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2",
     "zod": "^4.4.3"

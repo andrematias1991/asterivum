@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Asterivum",
+    "slug": "asterivum",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "asterivum",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#fbf7ed"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.asterivum.app",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#fbf7ed"
+      },
+      "package": "com.asterivum.app",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Allow Asterivum to securely access your saved session."
+        }
+      ],
+      "expo-localization"
+    ]
+  }
+}

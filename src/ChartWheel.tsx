@@ -1,4 +1,7 @@
 import type { Aspect, Chart, Planet } from "./types";
+import { Maximize2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
+import { useI18n } from "./i18n";
 
 const CENTER = 280;
 const OUTER = 274;
@@ -95,6 +98,7 @@ function AspectFigure({
 }
 
 export default function ChartWheel({ chart }: { chart: Chart }) {
+  const { t } = useI18n();
   const ascendant = chart.angles.ascendant.longitude;
   const isBiWheel = chart.mode !== "NATAL";
   // Zodiac longitude increases counter-clockwise, with house one fixed at 9 o'clock.
@@ -111,12 +115,32 @@ export default function ChartWheel({ chart }: { chart: Chart }) {
 
   return (
     <div className={`wheel-wrap ${isBiWheel ? "bi-wheel" : "natal-wheel"}`}>
-      <svg
-        className="chart-wheel"
-        viewBox="0 0 560 560"
-        role="img"
-        aria-label={`${chart.mode.toLowerCase()} astrology chart wheel, Ascendant at nine o'clock`}
+      <TransformWrapper
+        key={`${chart.mode}-${chart.natalDate}-${chart.planets[0]?.longitude || 0}`}
+        initialScale={1}
+        minScale={1}
+        maxScale={5}
+        centerOnInit
+        centerZoomedOut
+        limitToBounds
+        wheel={{ disabled:true }}
+        doubleClick={{ mode:"zoomIn", step:0.7 }}
+        panning={{ velocityDisabled:true }}
       >
+        {({zoomIn,zoomOut,resetTransform,centerView})=><>
+          <div className="chart-zoom-controls no-print" aria-label={t("Chart zoom controls")}>
+            <button type="button" onClick={()=>zoomIn()} aria-label={t("Zoom in")} title={t("Zoom in")}><ZoomIn size={17}/></button>
+            <button type="button" onClick={()=>zoomOut()} aria-label={t("Zoom out")} title={t("Zoom out")}><ZoomOut size={17}/></button>
+            <button type="button" onClick={()=>centerView(1)} aria-label={t("Fit chart")} title={t("Fit chart")}><Maximize2 size={17}/></button>
+            <button type="button" onClick={()=>resetTransform()} aria-label={t("Reset chart")} title={t("Reset chart")}><RotateCcw size={17}/></button>
+          </div>
+          <TransformComponent wrapperClass="chart-zoom-viewport" contentClass="chart-zoom-content">
+            <svg
+              className="chart-wheel"
+              viewBox="0 0 560 560"
+              role="img"
+              aria-label={`${chart.mode.toLowerCase()} astrology chart wheel, Ascendant at nine o'clock`}
+            >
         <circle cx={CENTER} cy={CENTER} r={OUTER} className="wheel-sky" />
         <circle cx={CENTER} cy={CENTER} r={ZODIAC_OUTER} className="wheel-bg" />
         <circle cx={CENTER} cy={CENTER} r={ZODIAC_INNER} className="wheel-line zodiac-inner" />
@@ -250,7 +274,10 @@ export default function ChartWheel({ chart }: { chart: Chart }) {
             </g>
           );
         })}
-      </svg>
+            </svg>
+          </TransformComponent>
+        </>}
+      </TransformWrapper>
     </div>
   );
 }

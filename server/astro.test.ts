@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ascendant, astrocartography, astroInternals, birthToUtc, calculateChart, calculateSynastry, ephemeris, forecast, midheaven, transitReport, utcOffsetAtLocalTime } from './astro';
 import { calculateNatalAnalysis } from './natalAnalysis';
+import { chironLongitude, meanLilithLongitude } from './minorBodies';
 import type { BirthData } from './types';
 
 const sample:BirthData={name:'Test Native',birthDate:'1990-01-01',birthTime:'12:00',place:'Lisbon',latitude:38.7223,longitude:-9.1393,timezone:0,houseSystem:'WHOLE_SIGN',zodiac:'TROPICAL'};
@@ -10,7 +11,10 @@ describe('astrology engine',()=>{
     expect(birthToUtc({...sample,birthTime:'14:30',timezone:2}).toISOString()).toBe('1990-01-01T12:30:00.000Z');
   });
   it('resolves historical daylight-saving time from an IANA timezone',()=>{
+    expect(utcOffsetAtLocalTime('1991-01-19','04:35','Europe/Lisbon')).toBe(0);
     expect(utcOffsetAtLocalTime('1991-09-19','04:35','Europe/Lisbon')).toBe(1);
+    expect(utcOffsetAtLocalTime('2026-10-25','01:30','Europe/Lisbon')).toBe(1);
+    expect(()=>utcOffsetAtLocalTime('2026-03-29','01:30','Europe/Lisbon')).toThrow(/does not exist/);
     expect(birthToUtc({...sample,birthDate:'1991-09-19',birthTime:'04:35',timezone:0,timezoneId:'Europe/Lisbon'}).toISOString()).toBe('1991-09-19T03:35:00.000Z');
   });
   it('normalizes circular degrees',()=>{
@@ -19,11 +23,18 @@ describe('astrology engine',()=>{
   });
   it('calculates a complete natal chart',()=>{
     const chart=calculateChart(sample);
-    expect(chart.planets).toHaveLength(11);
+    expect(chart.planets).toHaveLength(13);
     expect(chart.houses).toHaveLength(12);
     expect(chart.natalAspects).toEqual(chart.aspects);
     expect(chart.planets.every(p=>p.longitude>=0&&p.longitude<360)).toBe(true);
     expect(chart.aspects.length).toBeGreaterThan(0);
+  });
+  it('matches JPL Horizons Chiron references and the mean lunar apogee',()=>{
+    expect(chironLongitude(new Date('1990-01-01T12:00:00Z'))).toBeCloseTo(103.809218,2);
+    expect(chironLongitude(new Date('2026-07-25T12:00:00Z'))).toBeCloseTo(30.828537,2);
+    expect(chironLongitude(new Date('2050-01-01T12:00:00Z'))).toBeCloseTo(246.651086,1);
+    expect(meanLilithLongitude(new Date('2000-01-01T12:00:00Z'))).toBeCloseTo(263.3532465,6);
+    expect(meanLilithLongitude(new Date('2026-07-25T12:00:00Z'))).toBeCloseTo(264.1895118,6);
   });
   it('matches reference Ascendant, Midheaven and Placidus cusps',()=>{
     const date=new Date('1990-01-01T12:00:00.000Z');
@@ -84,13 +95,15 @@ describe('astrology engine',()=>{
   });
   it('projects four angular astrocartography lines per planet',()=>{
     const map=astrocartography(sample);
-    expect(map.lines).toHaveLength(40);
+    expect(map.lines).toHaveLength(52);
+    expect(new Set(map.lines.map(line=>line.planet))).toEqual(new Set(['Sun','Moon','Mercury','Venus','Mars','Jupiter','Saturn','Uranus','Neptune','Pluto','Node','Chiron','Lilith']));
     expect(new Set(map.lines.map(line=>line.angle))).toEqual(new Set(['ASC','DSC','MC','IC']));
+    expect(map.lines.filter(line=>line.angle==='ASC'||line.angle==='DSC').every(line=>line.points.length===265)).toBe(true);
     expect(map.lines.every(line=>line.points.every(point=>point.longitude>=-180&&point.longitude<=180))).toBe(true);
   });
   it('builds a complete evidence-based Level I natal analysis',()=>{
     const analysis=calculateNatalAnalysis(sample);
-    expect(analysis.planets).toHaveLength(11);
+    expect(analysis.planets).toHaveLength(13);
     expect(analysis.planets.every(planet=>planet.house>=1&&planet.house<=12)).toBe(true);
     expect(analysis.elements.total).toBe(10);
     expect(Object.values(analysis.elements.counts).reduce((sum,count)=>sum+count,0)).toBe(10);

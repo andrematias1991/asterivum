@@ -190,7 +190,7 @@ function ProfileModal({
   const [form, setForm] = useState(profile || blank),
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
-    [locationConfirmed, setLocationConfirmed] = useState(Boolean(profile)),
+    [locationConfirmed, setLocationConfirmed] = useState(Boolean(profile?.timezoneId)),
     [locationResults, setLocationResults] = useState<LocationResult[]>([]),
     [locationLoading, setLocationLoading] = useState(false),
     [locationOpen, setLocationOpen] = useState(false),
@@ -204,7 +204,7 @@ function ProfileModal({
   };
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!locationConfirmed) {
+    if (!locationConfirmed || !selectedTimezone) {
       setError(t("Select a birth place from the search results."));
       return;
     }
@@ -217,6 +217,7 @@ function ProfileModal({
         latitude:Number(form.latitude),
         longitude:Number(form.longitude),
         timezone:Number(form.timezone),
+        timezoneId:selectedTimezone,
         isPrimary:Boolean(form.isPrimary),
       };
       if (guest) {
@@ -263,7 +264,7 @@ function ProfileModal({
   }, [form.place, locationConfirmed, locationOpen]);
 
   useEffect(() => {
-    if (!selectedTimezone) return;
+    if (!selectedTimezone || !/^\d{4}-\d{2}-\d{2}$/.test(form.birthDate) || !/^\d{2}:\d{2}$/.test(form.birthTime)) return;
     const controller = new AbortController();
     api<{ offset:number }>("/locations/offset", {
       method:"POST",
@@ -286,6 +287,11 @@ function ProfileModal({
   }, [form.birthDate, form.birthTime, selectedTimezone]);
 
   const chooseLocation = (location: LocationResult) => {
+    if (!location.timezone) {
+      setError(t("The selected location does not provide a time zone."));
+      setLocationConfirmed(false);
+      return;
+    }
     setForm({
       ...form,
       place: location.label,
@@ -408,28 +414,17 @@ function ProfileModal({
               aria-readonly="true"
             />
           </label>
-          <label>
-            {t("UTC offset at birth")}
-            <input
-              type="number"
-              step="0.25"
-              min="-14"
-              max="14"
-              value={form.timezone}
-              onChange={(e) => {
-                setSelectedTimezone(null);
-                setForm({ ...form, timezone:Number(e.target.value), timezoneId:null });
-              }}
-            />
-            {selectedTimezone && (
-              <small
-                className="field-note"
-                data-detected-offset={form.timezone}
-              >
-                {t("Detected from")} {selectedTimezone}
-              </small>
+          <div className="automatic-timezone">
+            <strong>{t("Time zone and UTC offset")}</strong>
+            {selectedTimezone ? (
+              <span data-detected-offset={form.timezone}>
+                {selectedTimezone} · UTC{Number(form.timezone) >= 0 ? "+" : ""}{form.timezone}
+              </span>
+            ) : (
+              <span>{t("Select a location to calculate this automatically.")}</span>
             )}
-          </label>
+            <small>{t("Calculated from the location, birth date and local time, including historical daylight saving rules.")}</small>
+          </div>
           <label>
             {t("House system")}
             <select
@@ -731,9 +726,29 @@ function ChartView({
     ),
     [date, setDate] = useState(new Date().toISOString().slice(0, 10)),
     [chart, setChart] = useState<Chart | null>(null),
-    [loading, setLoading] = useState(false);
+    [loading, setLoading] = useState(false),
+    [showChiron,setShowChiron]=useState(true),
+    [showLilith,setShowLilith]=useState(true),
+    [objectAspects,setObjectAspects]=useState(false);
   const profile = profiles.find((p) => p.id === selected) || profiles[0];
   const localPosition = (p:Planet) => `${p.degree}° ${String(p.minute).padStart(2,"0")}′ ${t(p.sign)}${p.retrograde ? " ℞" : ""}`;
+  const displayChart=useMemo(()=>{
+    if(!chart) return null;
+    const hidden=new Set<string>();
+    if(!showChiron) hidden.add("Chiron");
+    if(!showLilith) hidden.add("Lilith");
+    const visibleAspect=(aspect:{from:string;to:string})=>{
+      if(hidden.has(aspect.from)||hidden.has(aspect.to)) return false;
+      return objectAspects||![aspect.from,aspect.to].some(name=>name==="Chiron"||name==="Lilith");
+    };
+    return {
+      ...chart,
+      planets:chart.planets.filter(planet=>!hidden.has(planet.name)),
+      natal:chart.natal.filter(planet=>!hidden.has(planet.name)),
+      aspects:chart.aspects.filter(visibleAspect),
+      natalAspects:chart.natalAspects.filter(visibleAspect),
+    };
+  },[chart,showChiron,showLilith,objectAspects]);
   useEffect(() => {
     if (!profile) return;
     setLoading(true);
@@ -774,9 +789,9 @@ function ChartView({
           <button className="ghost no-print" disabled={!chart} onClick={async () => {
             if (guest) { onRequireAccount?.(); return; }
             const svg = document.querySelector(".chart-wheel") as SVGSVGElement | null;
-            if (chart && svg && profile) {
+            if (displayChart && svg && profile) {
               const { exportChartPdf } = await import("./pdfExports");
-              await exportChartPdf(profile, chart, svg);
+              await exportChartPdf(profile, displayChart, svg);
             }
           }}>
             <Download size={16} />
@@ -821,13 +836,18 @@ function ChartView({
             <span className="pill">
               {profile.zodiac} · {profile.houseSystem.replace("_", " ")}
             </span>
+            <div className="object-controls no-print" aria-label={t("Additional chart objects")}>
+              <label><input type="checkbox" checked={showChiron} onChange={event=>setShowChiron(event.target.checked)}/> ⚷ {t("Chiron")}</label>
+              <label><input type="checkbox" checked={showLilith} onChange={event=>setShowLilith(event.target.checked)}/> ⚸ {t("Lilith")}</label>
+              <label><input type="checkbox" checked={objectAspects} onChange={event=>setObjectAspects(event.target.checked)}/> {t("Include their aspects")}</label>
+            </div>
           </div>
-          {loading || !chart ? (
+          {loading || !displayChart ? (
             <div className="loading">{t("Calculating the sky…")}</div>
           ) : (
             <div className="chart-layout">
               <section className="wheel-card">
-                <ChartWheel chart={chart} />
+                <ChartWheel chart={displayChart} />
                 <div className="chart-legend">
                   <span>
                     <i className="conj" />
@@ -857,10 +877,10 @@ function ChartView({
                     <p className="eyebrow">{t("Celestial positions")}</p>
                     <h2>{t(mode === "NATAL" ? "Placements" : `${mode[0] + mode.slice(1).toLowerCase()} positions`)}</h2>
                   </div>
-                  <span>{new Date(chart.chartDate).toLocaleDateString(locale)}</span>
+                  <span>{new Date(displayChart.chartDate).toLocaleDateString(locale)}</span>
                 </div>
                 <div className="placements">
-                  {chart.planets.map((p) => (
+                  {displayChart.planets.map((p) => (
                     <div key={p.name}>
                       <span className="mini-glyph">{p.glyph}</span>
                       <strong>{t(p.name)}</strong>
@@ -868,7 +888,7 @@ function ChartView({
                         <span>{localPosition(p)}</span>
                       ) : (
                         <span className="dual-position">
-                          <b>N</b> {localPosition(chart.natal.find((natal) => natal.name === p.name) || p)}
+                          <b>N</b> {localPosition(displayChart.natal.find((natal) => natal.name === p.name) || p)}
                           <br />
                           <b>{mode === "TRANSIT" ? "T" : "P"}</b> {localPosition(p)}
                         </span>
@@ -879,14 +899,14 @@ function ChartView({
                 <div className="angles">
                   <div>
                     <small>{t("Ascendant").toUpperCase()}</small>
-                    <strong>{localPosition(chart.angles.ascendant)}</strong>
+                    <strong>{localPosition(displayChart.angles.ascendant)}</strong>
                   </div>
                   <div>
                     <small>{t("Midheaven").toUpperCase()}</small>
-                    <strong>{localPosition(chart.angles.midheaven)}</strong>
+                    <strong>{localPosition(displayChart.angles.midheaven)}</strong>
                   </div>
                 </div>
-                <p className="hint">{t(chart.settings.houseAccuracy)}</p>
+                <p className="hint">{t(displayChart.settings.houseAccuracy)}</p>
               </section>
               <section className="aspects-card">
                 <div className="section-title">
@@ -894,10 +914,10 @@ function ChartView({
                     <p className="eyebrow">{t("Aspect matrix")}</p>
                     <h2>{t("Strongest aspects")}</h2>
                   </div>
-                  <span>{chart.aspects.length} {t("found")}</span>
+                  <span>{displayChart.aspects.length} {t("found")}</span>
                 </div>
                 <div className="aspect-list">
-                  {chart.aspects.slice(0, 14).map((a, i) => (
+                  {displayChart.aspects.slice(0, 14).map((a, i) => (
                     <div key={i}>
                       <strong>{t(a.from)}</strong>
                       <span className={`aspect-symbol ${a.type.toLowerCase()}`}>

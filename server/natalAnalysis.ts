@@ -23,7 +23,7 @@ const traditionalRulers:Record<string,string> = {
 };
 const modernCoRulers:Record<string,string|undefined> = { Scorpio:'Pluto', Aquarius:'Uranus', Pisces:'Neptune' };
 const ptLabels:Record<string,string> = {
-  Sun:'Sol',Moon:'Lua',Mercury:'Mercúrio',Venus:'Vénus',Mars:'Marte',Jupiter:'Júpiter',Saturn:'Saturno',Uranus:'Urano',Neptune:'Neptuno',Pluto:'Plutão',Node:'Nodo',
+  Sun:'Sol',Moon:'Lua',Mercury:'Mercúrio',Venus:'Vénus',Mars:'Marte',Jupiter:'Júpiter',Saturn:'Saturno',Uranus:'Urano',Neptune:'Neptuno',Pluto:'Plutão',Node:'Nodo',Chiron:'Quíron',Lilith:'Lilith',
   Aries:'Carneiro',Taurus:'Touro',Gemini:'Gémeos',Cancer:'Caranguejo',Leo:'Leão',Virgo:'Virgem',Libra:'Balança',Scorpio:'Escorpião',Sagittarius:'Sagitário',Capricorn:'Capricórnio',Aquarius:'Aquário',Pisces:'Peixes',
   Conjunction:'Conjunção',Sextile:'Sextil',Square:'Quadratura',Trine:'Trígono',Opposition:'Oposição',
   'New Moon':'Lua Nova',Crescent:'Crescente','First Quarter':'Quarto Crescente',Gibbous:'Gibosa','Full Moon':'Lua Cheia',Disseminating:'Disseminante','Last Quarter':'Quarto Minguante',Balsamic:'Balsâmica',
@@ -92,13 +92,14 @@ function placementText(name:string,sign:string,house:number,language:Language) {
 export function calculateNatalAnalysis(data:BirthData,language:Language='en') {
   const chart=calculateChart(data);
   const natalAspects=chart.aspects as NatalAspect[];
+  const analyticalAspects=natalAspects.filter(aspect=>![aspect.from,aspect.to].some(name=>name==='Chiron'||name==='Lilith'));
   const planets=chart.natal.map(planet=>({
     ...planet,
     house:houseFor(planet.longitude,chart.houses),
     ...signMeta[planet.sign],
     dignity:dignityFor(planet.name,planet.sign),
   }));
-  const counted=planets.filter(planet=>planet.name!=='Node');
+  const counted=planets.filter(planet=>!['Node','Chiron','Lilith'].includes(planet.name));
   const elements=distribution(counted.map(planet=>planet.element),['Fire','Earth','Air','Water']);
   const modalities=distribution(counted.map(planet=>planet.modality),['Cardinal','Fixed','Mutable']);
   const polarities=distribution(counted.map(planet=>planet.polarity),['Active','Receptive']);
@@ -141,7 +142,7 @@ export function calculateNatalAnalysis(data:BirthData,language:Language='en') {
 
   const luminaries=new Set(['Sun','Moon']);
   const personal=new Set(['Mercury','Venus','Mars']);
-  const significantAspects=natalAspects.map(aspect=>{
+  const significantAspects=analyticalAspects.map(aspect=>{
     let score=Math.max(0,60-aspect.orb*7);
     if (luminaries.has(String(aspect.from))) score+=14;
     if (luminaries.has(String(aspect.to))) score+=14;
@@ -152,7 +153,7 @@ export function calculateNatalAnalysis(data:BirthData,language:Language='en') {
     return {...aspect,significance:Math.min(100,Math.round(score))};
   }).sort((a,b)=>b.significance-a.significance||a.orb-b.orb);
 
-  const aspectBetween=(first:string,second:string)=>natalAspects.find(aspect=>(aspect.from===first&&aspect.to===second)||(aspect.from===second&&aspect.to===first));
+  const aspectBetween=(first:string,second:string)=>analyticalAspects.find(aspect=>(aspect.from===first&&aspect.to===second)||(aspect.from===second&&aspect.to===first));
   const marsPluto=aspectBetween('Mars','Pluto'), sunMoon=aspectBetween('Sun','Moon');
   const ic=angleByName.IC, midheaven=angleByName.Midheaven;
   const icOccupants=counted.filter(planet=>planet.house===4).map(planet=>planet.name);

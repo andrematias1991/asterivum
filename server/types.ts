@@ -13,6 +13,7 @@ export interface AuthedRequest extends Request {
   user?: AuthUser;
   sessionTokenHash?: string;
   csrfHash?: string;
+  authMode?: 'cookie' | 'bearer';
 }
 
 export interface BirthData {
@@ -22,7 +23,7 @@ export interface BirthData {
   place: string;
   latitude: number;
   longitude: number;
-  timezone: number;
+  timezone?: number;
   timezoneId?: string | null;
   houseSystem?: 'PLACIDUS' | 'WHOLE_SIGN' | 'EQUAL';
   zodiac?: 'TROPICAL' | 'SIDEREAL';

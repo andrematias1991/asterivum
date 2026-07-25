@@ -24,7 +24,7 @@ export function createApp() {
     origin: (origin, callback) => callback(null, !origin || origin === config.appOrigin),
     credentials: true,
     methods: ['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'],
-    allowedHeaders: ['Content-Type','X-CSRF-Token','X-App-Language'],
+    allowedHeaders: ['Content-Type','X-CSRF-Token','X-App-Language','X-Client-Platform','Authorization'],
     maxAge: 86400,
   }));
   app.use(cookieParser());

@@ -32,13 +32,23 @@ describe('session security', () => {
       mode:'NATAL',
       profile:{
         name:'Guest chart',birthDate:'1991-09-19',birthTime:'04:35',place:'Faro, Portugal',
-        latitude:37.0194,longitude:-7.9304,timezone:1,timezoneId:'Europe/Lisbon',
+        latitude:37.0194,longitude:-7.9304,timezone:-8,timezoneId:'Europe/Lisbon',
         houseSystem:'PLACIDUS',zodiac:'TROPICAL',notes:'',isPrimary:false,
       },
     });
     expect(preview.status).toBe(200);
     expect(preview.body.chart.mode).toBe('NATAL');
-    expect(preview.body.chart.planets).toHaveLength(11);
+    expect(preview.body.chart.planets).toHaveLength(13);
+    expect(preview.body.chart.natalDate).toBe('1991-09-19T03:35:00.000Z');
+    const missingTimezone = await request(app).post('/api/charts/preview').send({
+      mode:'NATAL',
+      profile:{
+        name:'Invalid location',birthDate:'1991-09-19',birthTime:'04:35',place:'Typed only',
+        latitude:37.0194,longitude:-7.9304,timezone:1,
+        houseSystem:'PLACIDUS',zodiac:'TROPICAL',notes:'',isPrimary:false,
+      },
+    });
+    expect(missingTimezone.status).toBe(400);
     expect((await request(app).get('/api/ephemeris?start=2026-01-01&end=2026-01-03&step=1')).status).toBe(200);
     expect((await request(app).get('/api/natal-analysis/1')).status).toBe(401);
     expect((await request(app).get('/api/astrocartography/1')).status).toBe(401);
@@ -68,6 +78,27 @@ describe('session security', () => {
     const csrf = registration.body.csrfToken;
     expect((await agent.post('/api/auth/logout').set('X-CSRF-Token', csrf)).status).toBe(204);
     expect((await agent.get('/api/me')).status).toBe(401);
+  });
+
+  it('supports opaque bearer sessions for the native mobile client', async () => {
+    const app=(await import('./app.js')).createApp();
+    const registration=await request(app).post('/api/auth/register').set('X-Client-Platform','mobile').send({
+      name:'Mobile Test',email:'mobile@example.test',password:'CorrectHorseBattery12!',
+    });
+    expect(registration.status).toBe(201);
+    expect(registration.body.sessionToken).toEqual(expect.any(String));
+    expect(registration.headers['set-cookie']).toBeUndefined();
+    const authorization=`Bearer ${registration.body.sessionToken}`;
+    expect((await request(app).get('/api/me').set('Authorization',authorization)).status).toBe(200);
+    const profile=await request(app).post('/api/profiles').set('Authorization',authorization).send({
+      name:'Mobile Native',birthDate:'1991-09-19',birthTime:'04:35',place:'Faro, Portugal',
+      latitude:37.0194,longitude:-7.9304,timezone:-8,timezoneId:'Europe/Lisbon',houseSystem:'PLACIDUS',zodiac:'TROPICAL',notes:'',isPrimary:true,
+    });
+    expect(profile.status).toBe(201);
+    const profiles=await request(app).get('/api/profiles').set('Authorization',authorization);
+    expect(profiles.body.profiles[0].timezone).toBe(1);
+    expect((await request(app).post('/api/auth/logout').set('Authorization',authorization)).status).toBe(204);
+    expect((await request(app).get('/api/me').set('Authorization',authorization)).status).toBe(401);
   });
 
   it('rejects short passwords', async () => {

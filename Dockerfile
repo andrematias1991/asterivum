@@ -13,7 +13,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --omit=optional && npm cache clean --force
+RUN npm ci --omit=dev \
+    && node -e "import('sharp').then(({ default: sharp }) => console.log('Sharp runtime ready:', sharp.versions.sharp, 'libvips', sharp.versions.vips))" \
+    && npm cache clean --force
 COPY --from=build --chown=node:node /app/build/server ./build/server
 
 USER node

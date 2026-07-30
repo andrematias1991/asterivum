@@ -1,6 +1,12 @@
 # Asterivum — Professional Astrology Studio
 
-Asterivum is a self-hosted bilingual astrology workspace for professional astrologers. It combines private client profiles, natal and transit charts, ephemerides, forecasting, synastry, astrocartography, printing, PDF reports, and administration in one responsive application.
+Asterivum is a self-hosted bilingual astrology workspace for professional astrologers. It combines private client profiles, natal and transit charts, ephemerides, forecasting, synastry, astrocartography, printing, PDF reports, private chart annotations, and administration in one responsive application.
+
+Asterivum Atlas adds a separate public directory for complementary-care practitioners and clinics. Listings use draft/revision workflows, privacy-aware map markers, regulated-specialty credential declarations, and administrator approval before anything becomes public.
+
+The platform distinguishes guest, normal registered, verified professional, verified clinic, and administrator access. Professional/clinic upgrades and new directory specialties use administrator approval queues. The administration area includes last-login data, aggregate daily page views, and a privacy-conscious activity log; it does not store visitor IP addresses or browser fingerprints.
+
+Directory location pictures are normalized to WebP, resized, and stripped of embedded metadata by the API. Development stores them under `data/uploads`; production requires S3-compatible object storage. See [.env.example](.env.example) and [HOSTINGER_DEPLOYMENT.md](HOSTINGER_DEPLOYMENT.md).
 
 The interface supports English and Portuguese (Portugal). Language preference is stored locally in the browser.
 
@@ -21,6 +27,8 @@ No default administrator is created. To bootstrap one, set `ADMIN_EMAIL` and `AD
 ## Production
 
 Production uses MySQL, revocable HttpOnly sessions, CSRF protection, security headers, request limits, rate limiting, and tracked schema migrations.
+
+For the Atlas map, configure `VITE_MAP_STYLE_URL` during the frontend build when using a commercial or self-hosted MapLibre tile provider. The OpenStreetMap raster fallback is intended for development and low-volume evaluation; production use must follow the selected tile provider's usage policy.
 
 ```bash
 npm ci

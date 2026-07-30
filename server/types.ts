@@ -1,12 +1,16 @@
 import type { Request } from 'express';
 
 export type Role = 'USER' | 'ADMIN';
+export type AccountType = 'NORMAL' | 'PROFESSIONAL' | 'CLINIC';
+export type VerificationStatus = 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED';
 
 export interface AuthUser {
   id: number;
   email: string;
   name: string;
   role: Role;
+  accountType: AccountType;
+  verificationStatus: VerificationStatus;
 }
 
 export interface AuthedRequest extends Request {

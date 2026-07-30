@@ -14,6 +14,14 @@ const schema = z.object({
   ALLOW_REGISTRATION: booleanValue,
   ADMIN_EMAIL: z.email().optional(),
   ADMIN_INITIAL_PASSWORD: z.string().min(14).optional(),
+  VITE_MAP_STYLE_URL: z.url().optional(),
+  S3_ENDPOINT: z.url().optional(),
+  S3_REGION: z.string().min(1).default('auto'),
+  S3_BUCKET: z.string().min(1).optional(),
+  S3_ACCESS_KEY_ID: z.string().min(1).optional(),
+  S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  IMAGE_PUBLIC_BASE_URL: z.url().optional(),
+  UPLOAD_DIRECTORY: z.string().default('data/uploads'),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -37,4 +45,6 @@ export const config = {
   registrationEnabled: parsed.data.ALLOW_REGISTRATION || parsed.data.NODE_ENV !== 'production',
   appOrigin: parsed.data.APP_ORIGIN || 'http://localhost:5173',
   cookieDomain: parsed.data.COOKIE_DOMAIN,
+  mapStyleOrigin: parsed.data.VITE_MAP_STYLE_URL ? new URL(parsed.data.VITE_MAP_STYLE_URL).origin : undefined,
+  imageStorageConfigured:Boolean(parsed.data.S3_ENDPOINT&&parsed.data.S3_BUCKET&&parsed.data.S3_ACCESS_KEY_ID&&parsed.data.S3_SECRET_ACCESS_KEY&&parsed.data.IMAGE_PUBLIC_BASE_URL),
 };

@@ -22,10 +22,11 @@ export async function api<T>(path:string, options:RequestInit = {}):Promise<T> {
   const method = (options.method || 'GET').toUpperCase();
   const csrf = !['GET','HEAD','OPTIONS'].includes(method) ? sessionStorage.getItem('asterivum_csrf') || cookie('astralis_csrf') : undefined;
   const language = localStorage.getItem('asterivum_language') === 'pt-PT' ? 'pt-PT' : 'en';
+  const isForm=typeof FormData!=='undefined'&&options.body instanceof FormData;
   const res = await fetch(BASE+path, {
     ...options,
     credentials:'include',
-    headers:{ 'X-App-Language':language, ...(options.body ? {'Content-Type':'application/json'} : {}), ...(csrf ? {'X-CSRF-Token':csrf} : {}), ...options.headers },
+    headers:{ 'X-App-Language':language, ...(options.body&&!isForm ? {'Content-Type':'application/json'} : {}), ...(csrf ? {'X-CSRF-Token':csrf} : {}), ...options.headers },
   });
   if (res.status === 204) {
     if (path === '/auth/logout') sessionStorage.removeItem('asterivum_csrf');

@@ -19,6 +19,7 @@
     "seed": "node --import tsx server/seed.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1098.0",
     "astronomy-engine": "^2.1.19",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
@@ -30,10 +31,13 @@
     "helmet": "^8.3.0",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.24.0",
+    "maplibre-gl": "^6.0.0",
+    "multer": "^2.2.0",
     "mysql2": "^3.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-zoom-pan-pinch": "^4.0.3",
+    "sharp": "^0.35.3",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2",
     "zod": "^4.4.3"
@@ -49,6 +53,7 @@
     "@types/cors": "^2.8.19",
     "@types/d3-geo": "^3.1.0",
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.2.0",
     "@types/node": "^24.10.13",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

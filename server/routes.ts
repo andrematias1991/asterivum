@@ -7,8 +7,15 @@ import { config } from './config.js';
 import { astrocartography, calculateChart, calculateSynastry, ephemeris, forecast, transitReport, TRANSIT_ASPECT_NAMES, utcOffsetAtLocalTime } from './astro.js';
 import { calculateNatalAnalysis } from './natalAnalysis.js';
 import type { AuthedRequest, AuthUser, BirthData } from './types.js';
+import { annotationRoutes } from './annotationRoutes.js';
+import { directoryRoutes } from './directoryRoutes.js';
+import { platformRoutes } from './platformRoutes.js';
+import { recordActivity } from './analytics.js';
 
 export const api = Router();
+api.use(annotationRoutes);
+api.use(directoryRoutes);
+api.use(platformRoutes);
 
 const credentials = z.object({ email:z.email(), password:z.string().min(12).max(128), name:z.string().min(2).max(80).optional() });
 const profileSchema = z.object({
@@ -38,7 +45,7 @@ function withAutomaticTimezone(profile:z.infer<typeof profileSchema>) {
 }
 
 function safeUser(row: Record<string, unknown>) {
-  return { id:row.id, email:row.email, name:row.name, role:row.role, status:row.status, createdAt:row.created_at };
+  return { id:Number(row.id), email:String(row.email), name:String(row.name), role:String(row.role), accountType:String(row.account_type||'NORMAL'), verificationStatus:String(row.verification_status||'NONE'), status:row.status, createdAt:row.created_at };
 }
 
 api.get('/health', async (_req,res) => {
@@ -94,7 +101,8 @@ api.post('/auth/register', async (req,res) => {
     if (code === 'ER_DUP_ENTRY' || code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error:'An account already exists for this email' });
     throw error;
   }
-  const user: AuthUser = { id:result.insertId, email, name:parsed.data.name, role:'USER' };
+  const user: AuthUser = { id:result.insertId, email, name:parsed.data.name, role:'USER',accountType:'NORMAL',verificationStatus:'NONE' };
+  void recordActivity(user.id,'ACCOUNT_REGISTERED','user',user.id).catch(()=>undefined);
   if (req.get('x-client-platform') === 'mobile') {
     const sessionToken=await createMobileSession(user,req.get('user-agent'));
     return res.status(201).json({user,sessionToken});
@@ -107,8 +115,13 @@ api.post('/auth/login', async (req,res) => {
   const parsed = credentials.omit({ name:true }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error:'Enter a valid email and password' });
   const row = await db.first<Record<string,unknown>>('SELECT * FROM users WHERE email=?', [parsed.data.email.toLowerCase()]);
-  if (!row || row.status !== 'ACTIVE' || !await bcrypt.compare(parsed.data.password, String(row.password_hash))) return res.status(401).json({ error:'Email or password is incorrect' });
-  const user = safeUser(row) as AuthUser;
+  if (!row || row.status !== 'ACTIVE' || !await bcrypt.compare(parsed.data.password, String(row.password_hash))) {
+    void recordActivity(row?Number(row.id):null,'LOGIN_FAILED','user',row?Number(row.id):null,{reason:'invalid_credentials'}).catch(()=>undefined);
+    return res.status(401).json({ error:'Email or password is incorrect' });
+  }
+  await db.execute('UPDATE users SET previous_login_at=last_login_at,last_login_at=CURRENT_TIMESTAMP,login_count=login_count+1 WHERE id=?',[Number(row.id)]);
+  void recordActivity(Number(row.id),'LOGIN_SUCCESS','user',Number(row.id)).catch(()=>undefined);
+  const user = safeUser(row) as unknown as AuthUser;
   if (req.get('x-client-platform') === 'mobile') {
     const sessionToken=await createMobileSession(user,req.get('user-agent'));
     return res.json({user,sessionToken});
@@ -137,6 +150,7 @@ api.post('/profiles', requireAuth, requireCsrf, async (req:AuthedRequest,res) =>
     return tx.execute(`INSERT INTO birth_profiles(user_id,name,birth_date,birth_time,place,latitude,longitude,timezone,timezone_id,house_system,zodiac,notes,is_primary)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.user!.id,p.name,p.birthDate,p.birthTime,p.place,p.latitude,p.longitude,p.timezone,p.timezoneId,p.houseSystem,p.zodiac,p.notes,p.isPrimary?1:0]);
   });
+  void recordActivity(req.user!.id,'PROFILE_CREATED','profile',result.insertId).catch(()=>undefined);
   res.status(201).json({ id:result.insertId });
 });
 
@@ -201,7 +215,9 @@ api.get('/charts/:id', requireAuth, async (req:AuthedRequest,res) => {
   if (!profile) return res.status(404).json({ error:'Profile not found' });
   const mode = z.enum(['NATAL','TRANSIT','PROGRESSION']).catch('NATAL').parse(req.query.mode);
   const target = req.query.date ? new Date(String(req.query.date)) : undefined;
-  res.json({ chart:calculateChart(profile,mode,target) });
+  const chart=calculateChart(profile,mode,target);
+  void recordActivity(req.user!.id,'CHART_CALCULATED','profile',Number(req.params.id),{mode}).catch(()=>undefined);
+  res.json({ chart });
 });
 
 api.get('/natal-analysis/:id', requireAuth, async (req:AuthedRequest,res) => {
@@ -260,6 +276,7 @@ api.post('/reports', requireAuth, requireCsrf, async (req:AuthedRequest,res) => 
   const r = parsed.data;
   if (r.profileId && !await profileById(r.profileId, req.user!.id)) return res.status(404).json({ error:'Profile not found' });
   const result = await db.execute('INSERT INTO saved_reports(user_id,profile_id,title,kind,payload) VALUES(?,?,?,?,?)', [req.user!.id,r.profileId,r.title,r.kind,JSON.stringify(r.payload)]);
+  void recordActivity(req.user!.id,'REPORT_CREATED','report',result.insertId,{kind:r.kind}).catch(()=>undefined);
   res.status(201).json({ id:result.insertId });
 });
 
@@ -267,23 +284,28 @@ api.get('/reports', requireAuth, async (req:AuthedRequest,res) => res.json({ rep
 
 api.get('/admin/overview', requireAuth, requireAdmin, async (_req,res) => {
   const since = new Date(Date.now() - 30*86400000).toISOString().slice(0,19).replace('T',' ');
-  const [usersCount, profilesCount, reportsCount, activeCount, users] = await Promise.all([
+  const [usersCount, profilesCount, reportsCount, newCount, activeCount, professionalCount,clinicCount,users] = await Promise.all([
     db.first<{n:number}>('SELECT count(*) n FROM users'),
     db.first<{n:number}>('SELECT count(*) n FROM birth_profiles'),
     db.first<{n:number}>('SELECT count(*) n FROM saved_reports'),
     db.first<{n:number}>('SELECT count(*) n FROM users WHERE created_at >= ?', [since]),
-    db.query(`SELECT id,email,name,role,status,created_at AS createdAt,
+    db.first<{n:number}>('SELECT count(DISTINCT user_id) n FROM sessions WHERE last_seen_at>=?',[since]),
+    db.first<{n:number}>("SELECT count(*) n FROM users WHERE account_type='PROFESSIONAL' AND verification_status='VERIFIED'"),
+    db.first<{n:number}>("SELECT count(*) n FROM users WHERE account_type='CLINIC' AND verification_status='VERIFIED'"),
+    db.query(`SELECT id,email,name,role,status,account_type AS accountType,verification_status AS verificationStatus,last_login_at AS lastLoginAt,previous_login_at AS previousLoginAt,login_count AS loginCount,created_at AS createdAt,
+      (SELECT MAX(last_seen_at) FROM sessions s WHERE s.user_id=users.id) lastActiveAt,
       (SELECT count(*) FROM birth_profiles p WHERE p.user_id=users.id) profileCount FROM users ORDER BY created_at DESC LIMIT 100`),
   ]);
   const stats = {
-    users:usersCount?.n || 0, profiles:profilesCount?.n || 0, reports:reportsCount?.n || 0, active30d:activeCount?.n || 0,
+    users:usersCount?.n || 0, profiles:profilesCount?.n || 0, reports:reportsCount?.n || 0,new30d:newCount?.n||0,active30d:activeCount?.n || 0,
+    professionals:professionalCount?.n||0,clinics:clinicCount?.n||0,
   };
   res.json({ stats,users });
 });
 
 api.patch('/admin/users/:id', requireAuth, requireCsrf, requireAdmin, async (req:AuthedRequest,res) => {
-  const parsed = z.object({ status:z.enum(['ACTIVE','SUSPENDED']).optional(), role:z.enum(['USER','ADMIN']).optional() }).safeParse(req.body);
-  if (!parsed.success || (!parsed.data.status && !parsed.data.role)) return res.status(400).json({ error:'No valid account change supplied' });
+  const parsed = z.object({ status:z.enum(['ACTIVE','SUSPENDED']).optional(), role:z.enum(['USER','ADMIN']).optional(),accountType:z.enum(['NORMAL','PROFESSIONAL','CLINIC']).optional(),verificationStatus:z.enum(['NONE','PENDING','VERIFIED','REJECTED']).optional() }).safeParse(req.body);
+  if (!parsed.success || (!parsed.data.status && !parsed.data.role&&!parsed.data.accountType&&!parsed.data.verificationStatus)) return res.status(400).json({ error:'No valid account change supplied' });
   if (Number(req.params.id) === req.user!.id && parsed.data.status === 'SUSPENDED') return res.status(400).json({ error:'You cannot suspend your own account' });
   const current = await db.first<{status:string;role:string}>('SELECT status,role FROM users WHERE id=?', [Number(req.params.id)]);
   if (!current) return res.status(404).json({ error:'User not found' });
@@ -292,6 +314,6 @@ api.patch('/admin/users/:id', requireAuth, requireCsrf, requireAdmin, async (req
     const activeAdmins = await db.first<{n:number}>("SELECT count(*) n FROM users WHERE role='ADMIN' AND status='ACTIVE'");
     if ((activeAdmins?.n || 0) <= 1) return res.status(400).json({ error:'Create another active administrator before removing the last one' });
   }
-  await db.execute('UPDATE users SET status=?,role=? WHERE id=?', [parsed.data.status||current.status,parsed.data.role||current.role,Number(req.params.id)]);
+  await db.execute('UPDATE users SET status=?,role=?,account_type=COALESCE(?,account_type),verification_status=COALESCE(?,verification_status) WHERE id=?', [parsed.data.status||current.status,parsed.data.role||current.role,parsed.data.accountType||null,parsed.data.verificationStatus||null,Number(req.params.id)]);
   res.json({ ok:true });
 });

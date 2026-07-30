@@ -46,20 +46,30 @@ export async function destroySession(req: AuthedRequest, res: Response) {
   res.clearCookie(CSRF_COOKIE, { ...options, httpOnly:false });
 }
 
+async function attachAuthenticatedUser(req:AuthedRequest) {
+  const authorization=req.get('authorization');
+  const bearer=authorization?.startsWith('Bearer ') ? authorization.slice(7).trim() : undefined;
+  const token = bearer || req.cookies?.[SESSION_COOKIE];
+  if(!token)return false;
+  const row = await db.first<AuthUser & { status:string; csrf_hash:string }>(`SELECT u.id,u.email,u.name,u.role,u.status,u.account_type AS accountType,u.verification_status AS verificationStatus,s.csrf_hash
+    FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP`, [hash(token)]);
+  if (!row || row.status !== 'ACTIVE') return false;
+  req.user = { id:Number(row.id), email:row.email, name:row.name, role:row.role,accountType:row.accountType,verificationStatus:row.verificationStatus };
+  req.sessionTokenHash = hash(token);
+  req.csrfHash = row.csrf_hash;
+  req.authMode=bearer ? 'bearer':'cookie';
+  void db.execute('UPDATE sessions SET last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=?', [req.sessionTokenHash]).catch(() => undefined);
+  return true;
+}
+
+export async function optionalAuth(req:AuthedRequest,res:Response,next:NextFunction) {
+  try { await attachAuthenticatedUser(req);next(); }
+  catch(error){next(error);}
+}
+
 export async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
-    const authorization=req.get('authorization');
-    const bearer=authorization?.startsWith('Bearer ') ? authorization.slice(7).trim() : undefined;
-    const token = bearer || req.cookies?.[SESSION_COOKIE];
-    if (!token) return res.status(401).json({ error:'Authentication required' });
-    const row = await db.first<AuthUser & { status:string; csrf_hash:string }>(`SELECT u.id,u.email,u.name,u.role,u.status,s.csrf_hash
-      FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP`, [hash(token)]);
-    if (!row || row.status !== 'ACTIVE') return res.status(401).json({ error:'Invalid or expired session' });
-    req.user = { id:Number(row.id), email:row.email, name:row.name, role:row.role };
-    req.sessionTokenHash = hash(token);
-    req.csrfHash = row.csrf_hash;
-    req.authMode=bearer ? 'bearer':'cookie';
-    void db.execute('UPDATE sessions SET last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=?', [req.sessionTokenHash]).catch(() => undefined);
+    if(!await attachAuthenticatedUser(req))return res.status(401).json({ error:'Authentication required' });
     next();
   } catch (error) { next(error); }
 }

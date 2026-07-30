@@ -27,11 +27,19 @@ COOKIE_DOMAIN=.example.com
 SESSION_SECRET=<at least 32 cryptographically random characters>
 ALLOW_REGISTRATION=false
 DATABASE_SSL=false
+S3_ENDPOINT=<your S3-compatible endpoint>
+S3_REGION=auto
+S3_BUCKET=asterivum-directory
+S3_ACCESS_KEY_ID=<storage access key>
+S3_SECRET_ACCESS_KEY=<storage secret>
+IMAGE_PUBLIC_BASE_URL=https://media.example.com
 ADMIN_EMAIL=<your email, first deployment only>
 ADMIN_INITIAL_PASSWORD=<unique 14+ character password, first deployment only>
 ```
 
 Railway supplies `PORT`; do not create or hard-code that variable. Generate the session secret locally:
+
+The object-storage bucket must allow public reads through `IMAGE_PUBLIC_BASE_URL`, but its write credentials stay private in Railway. The API validates, resizes, converts, and strips metadata from uploaded location images before storage. Do not rely on Railway's container filesystem for production uploads.
 
 ```sh
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
@@ -50,18 +58,23 @@ Build locally with the production API URL. On PowerShell:
 
 ```powershell
 $env:VITE_API_BASE_URL='https://api.example.com/api'
+# Optional production MapLibre style from your chosen tile provider:
+# $env:VITE_MAP_STYLE_URL='https://maps.example.com/style.json'
+$env:VITE_IMAGE_PUBLIC_BASE_URL='https://media.example.com'
 npm.cmd ci
 npm.cmd run build:web
 ```
 
-`VITE_API_BASE_URL` is compiled into the browser bundle. Rebuild if the API hostname changes. The build also creates a restrictive Content Security Policy that permits connections only to that API origin.
+The `VITE_` values are compiled into the browser bundle. Rebuild if any changes. The build creates a restrictive Content Security Policy that permits the configured API, map-style, and media origins. A third-party style should serve its tiles, sprites, and glyphs from the same permitted origin; otherwise add those documented provider origins to the CSP before deployment.
 
 ## 3. Upload to Hostinger Premium
 
 1. Back up the current `public_html` contents.
 2. Upload the **contents** of `build/public` to `public_html`, including `.htaccess`.
 3. Enable/verify SSL and force HTTPS in hPanel.
-4. Open the frontend and test login, logout, profile writes, chart generation, PDF export, and printing.
+4. Open the frontend and test login, logout, profile writes, chart generation, annotations, PDF export, printing, Atlas navigation, provider submission, and administrator moderation.
+
+Deploy the Railway API before uploading the new frontend. The API applies the account, analytics, suggestion, specialty-icon, and image migrations at startup. Confirm `/api/health` is healthy before replacing `public_html`.
 
 The included `.htaccess` provides React route fallback, disables directory listing, and adds browser security headers. If hPanel hides dotfiles, enable **Show hidden files** before checking the upload.
 

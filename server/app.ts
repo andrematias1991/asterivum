@@ -15,7 +15,8 @@ export function createApp() {
   app.use(helmet({
     contentSecurityPolicy:{ directives:{
       defaultSrc:["'self'"], scriptSrc:["'self'"], styleSrc:["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-      fontSrc:["'self'", 'https://fonts.gstatic.com'], imgSrc:["'self'", 'data:', 'blob:'], connectSrc:["'self'"],
+      fontSrc:["'self'", 'https://fonts.gstatic.com'], imgSrc:["'self'", 'data:', 'blob:', ...(config.mapStyleOrigin?[config.mapStyleOrigin]:[]), ...(config.IMAGE_PUBLIC_BASE_URL?[new URL(config.IMAGE_PUBLIC_BASE_URL).origin]:[]), 'https://tile.openstreetmap.org', 'https://*.tile.openstreetmap.org'], connectSrc:["'self'", ...(config.mapStyleOrigin?[config.mapStyleOrigin]:[]), 'https://tile.openstreetmap.org', 'https://*.tile.openstreetmap.org'],
+      workerSrc:["'self'", 'blob:'],
       objectSrc:["'none'"], frameAncestors:["'none'"], baseUri:["'self'"], formAction:["'self'"],
     }},
     crossOriginEmbedderPolicy:false,
@@ -29,6 +30,7 @@ export function createApp() {
   }));
   app.use(cookieParser());
   app.use(express.json({ limit:'1mb' }));
+  if(!config.isProduction)app.use('/uploads',express.static(resolve(config.UPLOAD_DIRECTORY),{maxAge:'1y',immutable:true}));
 
   const authLimiter = rateLimit({ windowMs:15*60*1000, limit:10, standardHeaders:'draft-8', legacyHeaders:false, message:{ error:'Too many attempts; try again later' } });
   const publicComputeLimiter = rateLimit({ windowMs:60*1000, limit:30, standardHeaders:'draft-8', legacyHeaders:false, message:{ error:'Too many requests; slow down' } });

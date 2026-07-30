@@ -1,4 +1,4 @@
-export type User = { id:number; email:string; name:string; role:'USER'|'ADMIN'; status?:string };
+export type User = { id:number; email:string; name:string; role:'USER'|'ADMIN'; accountType:'NORMAL'|'PROFESSIONAL'|'CLINIC'; verificationStatus:'NONE'|'PENDING'|'VERIFIED'|'REJECTED'; status?:string };
 export type Profile = { id:number; name:string; birthDate:string; birthTime:string; place:string; latitude:number; longitude:number; timezone:number; timezoneId?:string|null; houseSystem:'PLACIDUS'|'WHOLE_SIGN'|'EQUAL'; zodiac:'TROPICAL'|'SIDEREAL'; notes:string; isPrimary:number|boolean };
 export type Planet = { name:string; glyph:string; longitude:number; sign:string; signIndex:number; degree:number; minute:number; retrograde:boolean };
 export type Aspect = { from:string; to:string; type:string; glyph:string; angle:number; orb:number };
@@ -30,4 +30,30 @@ export type NatalAnalysis = {
   significantAspects:(Aspect&{significance:number})[];
   sections:{origins:NatalSection[];direction:NatalSection[]};
   synthesis:{resources:string;patterns:string;challenges:string;skills:string;direction:string};
+};
+
+export type AnnotationPoint = { x:number; y:number };
+export type ChartAnnotation =
+  | { id:string; type:'PEN'|'HIGHLIGHTER'; points:AnnotationPoint[]; color:string; width:number }
+  | { id:string; type:'LINE'|'ARROW'|'RECTANGLE'|'ELLIPSE'; start:AnnotationPoint; end:AnnotationPoint; color:string; width:number }
+  | { id:string; type:'TEXT'; position:AnnotationPoint; text:string; color:string; size:number };
+export type AnnotationContext = { profileId:number; secondProfileId?:number; mode:'NATAL'|'TRANSIT'|'PROGRESSION'|'SYNASTRY'; targetDate?:string };
+export type AnnotationSession = { id:number; profileId:number; title:string; chartMode:string; chartContext:AnnotationContext; annotations?:ChartAnnotation[]; createdAt:string; updatedAt:string };
+
+export type TherapySpecialty = { id:number; slug:string; nameEn:string; namePt:string; regulated:number|boolean; iconKey:string };
+export type DirectoryLocation = {
+  label:string; address:string; city:string; region:string; country:string; postalCode:string;
+  latitude:number; longitude:number; markerPrecision:'EXACT'|'APPROXIMATE'; isPrimary:boolean; imageId?:number|null; imageUrl?:string;
+};
+export type DirectoryCredential = { specialtyId:number|null; title:string; issuer:string; registrationNumber?:string; verified?:boolean };
+export type DirectoryListingPayload = {
+  listingType:'PRACTITIONER'|'CLINIC'; name:string; summary:string; description:string; email:string; phone:string; website:string;
+  languages:string[]; specialtyIds:number[]; credentials:DirectoryCredential[]; locations:DirectoryLocation[]; publishEmail:boolean; publishPhone:boolean;
+};
+export type DirectoryListing = Omit<DirectoryListingPayload,'specialtyIds'> & {
+  id:number; status:string; specialties:TherapySpecialty[]; distanceKm?:number|null;
+};
+export type OwnedDirectoryListing = {
+  id:number; status:string; draftPayload:DirectoryListingPayload; publishedPayload:DirectoryListingPayload|null;
+  moderationFeedback:string; createdAt:string; updatedAt:string;
 };

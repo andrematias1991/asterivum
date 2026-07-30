@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BookOpen,
@@ -15,7 +15,9 @@ import {
   LogIn,
   LogOut,
   Menu,
+  MapPinned,
   MoonStar,
+  PencilRuler,
   Plus,
   Printer,
   Save,
@@ -23,6 +25,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Store,
   Users,
   X,
 } from "lucide-react";
@@ -31,11 +34,17 @@ import ChartWheel from "./ChartWheel";
 import SynastryView from "./SynastryView";
 import AstroMapView from "./AstroMapView";
 import NatalAnalysisView from "./NatalAnalysisView";
+import DirectoryAdminView from "./DirectoryAdminView";
+import PlatformAdminView from "./PlatformAdminView";
 import { LanguageSwitch, useI18n } from "./i18n";
 import type { Chart, LocationResult, Planet, Profile, TransitReportEvent, User } from "./types";
 
 type View =
-  "dashboard" | "profiles" | "chart" | "analysis" | "ephemeris" | "forecast" | "synastry" | "astromap" | "admin";
+  "dashboard" | "profiles" | "chart" | "editor" | "analysis" | "ephemeris" | "forecast" | "synastry" | "astromap" | "directory" | "provider" | "admin";
+const ChartEditorView=lazy(()=>import("./ChartEditorView"));
+const WellnessDirectoryView=lazy(()=>import("./WellnessDirectoryView"));
+const ProviderListingsView=lazy(()=>import("./ProviderListingsView"));
+const Deferred=({children}:{children:React.ReactNode})=><Suspense fallback={<div className="loading">Loading…</div>}>{children}</Suspense>;
 const blank: Omit<Profile, "id"> = {
   name: "",
   birthDate: "1990-01-01",
@@ -1219,7 +1228,7 @@ function Admin() {
   const {t,locale}=useI18n();
   const [data, setData] = useState<{
     stats: Record<string, number>;
-    users: (User & { createdAt: string; profileCount: number })[];
+    users: (User & { createdAt: string; profileCount: number; lastLoginAt?:string|null; lastActiveAt?:string|null; loginCount:number })[];
   } | null>(null);
   const load = () => api<typeof data>("/admin/overview").then(setData);
   useEffect(() => {
@@ -1268,7 +1277,7 @@ function Admin() {
             <div className="stat">
               <Activity />
               <span>{data.stats.active30d}</span>
-              <p>{t("New in 30 days")}</p>
+              <p>{t("Active users · 30 days")}</p>
             </div>
           </div>
           <div className="table-card">
@@ -1284,7 +1293,9 @@ function Admin() {
                   <tr>
                     <th>{t("User")}</th>
                     <th>{t("Role")}</th>
+                    <th>{t("Account type")}</th>
                     <th>{t("Profiles")}</th>
+                    <th>{t("Last login")}</th>
                     <th>{t("Joined")}</th>
                     <th>{t("Status")}</th>
                     <th />
@@ -1298,7 +1309,9 @@ function Admin() {
                         <span>{u.email}</span>
                       </td>
                       <td>{u.role}</td>
+                      <td><span className="account-type-badge">{t(u.role==='ADMIN'?'ADMIN':u.accountType)}</span><small>{t(u.verificationStatus)}</small></td>
                       <td>{u.profileCount}</td>
+                      <td>{u.lastLoginAt?new Date(u.lastLoginAt).toLocaleString(locale):t("Never")}<small>{u.loginCount||0} {t("logins")}</small></td>
                       <td>{new Date(u.createdAt).toLocaleDateString(locale)}</td>
                       <td>
                         <span className={`status ${u.status?.toLowerCase()}`}>
@@ -1319,6 +1332,8 @@ function Admin() {
               </table>
             </div>
           </div>
+          <DirectoryAdminView />
+          <PlatformAdminView />
         </>
       )}
     </>
@@ -1363,6 +1378,9 @@ export default function App() {
   useEffect(() => {
     if (user) loadProfiles(); else setProfiles([]);
   }, [user]);
+  useEffect(()=>{
+    if(!checkingSession)api('/analytics/page-view',{method:'POST',body:JSON.stringify({pageKey:view})}).catch(()=>undefined);
+  },[view,user?.id,checkingSession]);
   const nav = (v: View, id?: number) => {
     setView(v);
     if (id) setSelected(id);
@@ -1380,11 +1398,14 @@ export default function App() {
     ["dashboard", t("Overview"), LayoutDashboard, false],
     ["profiles", t("Birth profiles"), Users, true],
     ["chart", t("Chart studio"), Compass, false],
+    ["editor", t("Chart editor"), PencilRuler, true],
     ["analysis", t("Natal analysis"), BookOpen, true],
     ["ephemeris", t("Ephemeris"), Database, false],
     ["forecast", t("Forecasts"), CalendarDays, true],
     ["synastry", t("Synastry"), HeartHandshake, true],
     ["astromap", t("Astro map"), Globe2, true],
+    ["directory", t("Wellness Atlas"), MapPinned, false],
+    ["provider", t("My practice listing"), Store, true],
   ] as const;
   return (
     <div className="app-shell">
@@ -1461,11 +1482,14 @@ export default function App() {
               onRequireAccount={()=>setAuthOpen(true)}
             /> : <section className="locked-feature guest-chart-empty"><Compass/><p className="eyebrow">{t("No account required")}</p><h1>{t("Create your guest chart")}</h1><p>{t("Enter birth details to calculate a natal or transit chart without saving personal data.")}</p><button className="primary" onClick={()=>setModal(true)}>{t("Create guest chart")}</button></section>
           )}{" "}
+          {view === "editor" && (user ? <Deferred><ChartEditorView profiles={profiles} /></Deferred> : <LockedFeature title={t("Chart editor")} onAccount={()=>setAuthOpen(true)}/>)}{" "}
           {view === "analysis" && (user ? <NatalAnalysisView profiles={profiles} /> : <LockedFeature title={t("Natal analysis")} onAccount={()=>setAuthOpen(true)}/>)}{" "}
           {view === "ephemeris" && <Ephemeris />}{" "}
           {view === "forecast" && (user ? <Forecast profiles={profiles} /> : <LockedFeature title={t("Forecasts")} onAccount={()=>setAuthOpen(true)}/>)}{" "}
           {view === "synastry" && (user ? <SynastryView profiles={profiles} /> : <LockedFeature title={t("Synastry")} onAccount={()=>setAuthOpen(true)}/>)}{" "}
           {view === "astromap" && (user ? <AstroMapView profiles={profiles} /> : <LockedFeature title={t("Astro map")} onAccount={()=>setAuthOpen(true)}/>)}{" "}
+          {view === "directory" && <Deferred><WellnessDirectoryView user={user} onAccount={()=>setAuthOpen(true)} onProvider={()=>user?nav("provider"):setAuthOpen(true)}/></Deferred>}{" "}
+          {view === "provider" && (user ? <Deferred><ProviderListingsView user={user}/></Deferred> : <LockedFeature title={t("My practice listing")} onAccount={()=>setAuthOpen(true)}/>)}{" "}
           {view === "admin" && user?.role === "ADMIN" && <Admin />}
         </div>
       </main>
